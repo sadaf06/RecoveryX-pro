@@ -176,15 +176,6 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var expandedAdmins by remember { mutableStateOf(setOf<String>()) }
 
-    // Super admin: pull recharge status for admin nodes shown on screen
-    val rechargeMobiles = remember(displayedUsers, currentUser) {
-        if (currentUser?.mobile == "admin") displayedUsers.filter { it.role == UserRole.ADMIN }.map { it.mobile }
-        else emptyList()
-    }
-    LaunchedEffect(rechargeMobiles) {
-        if (rechargeMobiles.isNotEmpty()) viewModel.loadSubscriptions(rechargeMobiles)
-    }
-
     // Filter rules
     val displayedUsers = remember(allUsersList, currentUser, selectedTab) {
         val curr = currentUser ?: return@remember emptyList()
@@ -204,6 +195,16 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
             // Normal Admin only sees their own users
             withoutSelfAndSuperAdmin.filter { it.creatorMobile == curr.mobile && it.role != UserRole.ADMIN }
         }
+    }
+
+    // Super admin: pull recharge status for admin nodes shown on screen
+    // (must come AFTER displayedUsers — Kotlin needs declaration order)
+    val rechargeMobiles = remember(displayedUsers, currentUser) {
+        if (currentUser?.mobile == "admin") displayedUsers.filter { it.role == UserRole.ADMIN }.map { it.mobile }
+        else emptyList()
+    }
+    LaunchedEffect(rechargeMobiles) {
+        if (rechargeMobiles.isNotEmpty()) viewModel.loadSubscriptions(rechargeMobiles)
     }
 
     Box(

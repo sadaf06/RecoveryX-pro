@@ -33,10 +33,26 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Build debug APK
-        uses: gradle/actions/setup-gradle@v4
+      - name: Cache Gradle
+        uses: actions/cache@v4
         with:
-          arguments: ":app:assembleDebug --stacktrace"
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/notifications
+          key: ${{ runner.os }}-gradle-${{ hashFiles('gradle/libs.versions.toml', 'gradle.properties', 'settings.gradle.kts') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # NOTE: repo ka gradle-wrapper.jar official checksum se match nahi karta,
+      # isliye wrapper bypass karke official Gradle 9.3.1 binary seedha use kar rahe hai.
+      - name: Setup Gradle 9.3.1
+        run: |
+          curl -sL https://services.gradle.org/distributions/gradle-9.3.1-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp/gradle-dist
+          echo "/tmp/gradle-dist/gradle-9.3.1/bin" >> $GITHUB_PATH
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

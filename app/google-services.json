@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "1234567890",
-    "project_id": "dummy-project",
-    "storage_bucket": "dummy-project.appspot.com"
+    "project_number": "42731277133",
+    "project_id": "vehile-app-data",
+    "storage_bucket": "vehile-app-data.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1234567890:android:abcdef123456",
+        "mobilesdk_app_id": "1:42731277133:android:9278491cfd223538364504",
         "android_client_info": {
           "package_name": "com.creationx.recoveryxpro"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "dummy-api-key"
+          "current_key": "AIzaSyBjuzNk6ihHwIytbFhWC5-F10ArRkRCgG8"
         }
       ],
       "services": {

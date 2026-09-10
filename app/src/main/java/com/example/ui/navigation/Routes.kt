@@ -18,7 +18,7 @@ object ManagePermissionsRoute
 object SearchRoute
 
 @Serializable
-data class VehicleDetailsRoute(val vehicleId: Int)
+data class VehicleDetailsRoute(val vehicleNumber: String)
 
 @Serializable
 object ImportDataRoute

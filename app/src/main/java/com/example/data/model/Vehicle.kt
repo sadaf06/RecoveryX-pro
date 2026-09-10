@@ -29,5 +29,6 @@ data class Vehicle(
     val confirmerName: String,
     val loanNo: String = "",
     val creatorMobile: String = "admin",
-    val fileName: String = "" // Tracker for which file this belongs to
+    val fileName: String = "", // Tracker for which file this belongs to
+    val bucket: String = "" // Upload bucket/storage identifier
 )

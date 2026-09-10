@@ -23,6 +23,14 @@ import com.example.ui.theme.MyApplicationTheme
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    try {
+        com.google.firebase.FirebaseApp.initializeApp(this)
+    } catch (e: Exception) {
+        android.util.Log.e("MainActivity", "Firebase initialization failed", e)
+    }
+    System.setProperty("org.apache.poi.util.POILogger", "org.apache.poi.util.NullLogger")
+    System.setProperty("log4j2.formatMsgNoLookups", "true")
+    System.setProperty("log4j2.disable.jmx", "true")
     enableEdgeToEdge()
 
     val db = Room.databaseBuilder(
@@ -30,7 +38,7 @@ class MainActivity : ComponentActivity() {
         AppDatabase::class.java, "vehicle-database"
     ).fallbackToDestructiveMigration().build()
     
-    val firestoreSyncManager = try { com.example.data.repository.FirestoreSyncManager() } catch (e: Exception) { null }
+    val firestoreSyncManager = com.example.data.repository.FirestoreSyncManager()
     val repository = DatabaseRepository(db.userDao(), db.vehicleDao(), db.fieldPermissionsDao(), db.searchHistoryDao(), firestoreSyncManager)
 
     setContent {
@@ -95,7 +103,7 @@ class MainActivity : ComponentActivity() {
                 composable<SearchRoute> {
                     SearchScreen(
                         repository = repository,
-                        onNavigateToDetails = { id -> navController.navigate(VehicleDetailsRoute(id)) },
+                        onNavigateToDetails = { number -> navController.navigate(VehicleDetailsRoute(number)) },
                         onBack = { navController.popBackStack() },
                         onLogout = {
                             navController.navigate(LoginRoute) {
@@ -108,7 +116,7 @@ class MainActivity : ComponentActivity() {
                 composable<VehicleDetailsRoute> { backStackEntry ->
                     val route = backStackEntry.toRoute<VehicleDetailsRoute>()
                     VehicleDetailsScreen(
-                        vehicleId = route.vehicleId,
+                        vehicleNumber = route.vehicleNumber,
                         repository = repository,
                         onBack = { navController.popBackStack() }
                     )

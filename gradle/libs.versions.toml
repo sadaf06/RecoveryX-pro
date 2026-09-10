@@ -40,7 +40,8 @@ firebaseBom = "34.12.0"
 secretsGradlePlugin = "2.0.1"
 kotlinxSerializationJson = "1.8.0"
 apachePoi = "5.2.5"
-googleServices = "4.4.2"
+googleServices = "4.4.4"
+desugarJdkLibs = "2.0.4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -91,9 +92,11 @@ roborazzi-junit-rule = { group = "io.github.takahirom.roborazzi", name = "robora
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
 firebase-ai = { group = "com.google.firebase", name = "firebase-ai" }
 firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore" }
+firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 apache-poi = { group = "org.apache.poi", name = "poi", version.ref = "apachePoi" }
 apache-poi-ooxml = { group = "org.apache.poi", name = "poi-ooxml", version.ref = "apachePoi" }
+desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugarJdkLibs" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

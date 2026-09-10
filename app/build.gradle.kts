@@ -50,8 +50,14 @@ android {
     }
   }
   compileOptions {
+    isCoreLibraryDesugaringEnabled = true
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
+  }
+  packagingOptions {
+    resources {
+      excludes += "META-INF/versions/9/**"
+    }
   }
   buildFeatures {
     compose = true
@@ -96,6 +102,7 @@ dependencies {
   // implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)
   implementation(libs.firebase.firestore)
+  implementation(libs.firebase.analytics)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   // implementation(libs.logging.interceptor)
@@ -106,6 +113,7 @@ dependencies {
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.apache.poi)
   implementation(libs.apache.poi.ooxml)
+  coreLibraryDesugaring(libs.desugar.jdk.libs)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)

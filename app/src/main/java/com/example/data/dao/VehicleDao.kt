@@ -28,8 +28,11 @@ interface VehicleDao {
     @Query("SELECT * FROM vehicles WHERE vehicleNumber LIKE '%' || :query")
     fun searchVehiclesByVehicleLast(query: String): Flow<List<Vehicle>>
 
-    @Query("SELECT * FROM vehicles WHERE vehicleNumber = :vehicleNumber LIMIT 1")
-    suspend fun getVehicleByNumber(vehicleNumber: String): Vehicle?
+    @Query("SELECT * FROM vehicles WHERE vehicleNumber = :vehicleNumber AND fileName = :fileName AND creatorMobile = :creatorMobile LIMIT 1")
+    suspend fun getVehicleByNumberInFile(vehicleNumber: String, fileName: String, creatorMobile: String): Vehicle?
+
+    @Query("SELECT * FROM vehicles WHERE vehicleNumber = :vehicleNumber")
+    fun getVehiclesByNumber(vehicleNumber: String): Flow<List<Vehicle>>
 
     @Query("SELECT * FROM vehicles WHERE id = :id LIMIT 1")
     fun getVehicleById(id: Int): Flow<Vehicle?>
@@ -46,11 +49,20 @@ interface VehicleDao {
     @Query("DELETE FROM vehicles WHERE creatorMobile = :creatorMobile AND fileName = :fileName")
     suspend fun deleteVehiclesByFile(creatorMobile: String, fileName: String)
 
+    @Query("DELETE FROM vehicles WHERE creatorMobile = :creatorMobile")
+    suspend fun deleteVehiclesByCreator(creatorMobile: String)
+
     @Query("SELECT fileName, COUNT(*) as recordCount FROM vehicles WHERE creatorMobile = :creatorMobile AND fileName != '' GROUP BY fileName")
     suspend fun getLocalFilesSummary(creatorMobile: String): List<LocalFileSummary>
 
     @Query("SELECT COUNT(*) FROM vehicles WHERE creatorMobile = :creatorMobile AND fileName = :fileName")
     suspend fun countVehiclesByFile(creatorMobile: String, fileName: String): Int
+
+    @Query("SELECT COUNT(*) FROM vehicles WHERE creatorMobile = :creatorMobile")
+    fun countAllVehiclesByAdmin(creatorMobile: String): Flow<Int>
+
+    @Query("DELETE FROM vehicles")
+    suspend fun deleteAllVehicles()
 }
 
 data class LocalFileSummary(

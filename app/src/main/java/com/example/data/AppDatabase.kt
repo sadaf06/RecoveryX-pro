@@ -29,7 +29,7 @@ class Converters {
     fun fromUserStatus(value: UserStatus): String = value.name
 }
 
-@Database(entities = [User::class, Vehicle::class, FieldPermissions::class, SearchHistory::class], version = 5, exportSchema = false)
+@Database(entities = [User::class, Vehicle::class, FieldPermissions::class, SearchHistory::class], version = 7, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao

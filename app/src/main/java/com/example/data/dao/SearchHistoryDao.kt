@@ -23,4 +23,13 @@ interface SearchHistoryDao {
 
     @Query("DELETE FROM search_histories")
     suspend fun clearAllHistory()
+
+    @Query("DELETE FROM search_histories WHERE id = :id")
+    suspend fun deleteHistoryById(id: Int)
+
+    @Query("DELETE FROM search_histories WHERE userMobile = :userMobile")
+    suspend fun deleteHistoryByUser(userMobile: String)
+
+    @Query("DELETE FROM search_histories WHERE creatorMobile = :creatorMobile")
+    suspend fun deleteHistoryByCreator(creatorMobile: String)
 }

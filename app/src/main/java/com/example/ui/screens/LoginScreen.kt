@@ -1,11 +1,14 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -35,48 +38,32 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
 
     fun checkAutoLogin(context: android.content.Context, onSuccess: (UserRole) -> Unit) {
         val prefs = context.getSharedPreferences("auth_prefs", android.content.Context.MODE_PRIVATE)
+        val userJson = prefs.getString("logged_in_user", null)
         val mobile = prefs.getString("logged_in_mobile", null)
         val loginTime = prefs.getLong("login_time", 0)
 
-        if (mobile != null) {
-            val thirtyDaysMillis = 30L * 24 * 60 * 60 * 1000
-            if (System.currentTimeMillis() - loginTime > thirtyDaysMillis) {
-                prefs.edit().clear().apply()
-                return // Token expired
-            }
+        val thirtyDaysMillis = 30L * 24 * 60 * 60 * 1000
+        if (System.currentTimeMillis() - loginTime > thirtyDaysMillis) {
+            prefs.edit().clear().apply()
+            return // Token expired
+        }
 
+        if (userJson != null) {
+            try {
+                val user = kotlinx.serialization.json.Json.decodeFromString<com.example.data.model.User>(userJson)
+                AuthManager.login(context, user)
+                onSuccess(user.role)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                prefs.edit().clear().apply()
+            }
+        } else if (mobile != null) {
             viewModelScope.launch {
                 isLoggingIn = true
-                var user = repository.getUserByMobile(mobile) // Try offline first to be quick
-                if (user == null) {
-                    try {
-                        user = repository.getUserFromFirestore(mobile)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-                
+                val user = repository.getUserByMobile(mobile)
                 if (user != null) {
-                    if (user.status == com.example.data.model.UserStatus.DISABLED) {
-                        error = "Account is deactivated. Contact Admin."
-                    } else {
-                        val currentDeviceId = android.provider.Settings.Secure.getString(
-                            context.contentResolver,
-                            android.provider.Settings.Secure.ANDROID_ID
-                        ) ?: "device_id_unknown"
-
-                        // For Auto login, we skip password since token is valid, but we still verify device if not admin
-                        if (user.role == UserRole.ADMIN || user.mobile == "admin") {
-                            AuthManager.login(context, user)
-                            onSuccess(user.role)
-                        } else if (user.registeredDeviceId == currentDeviceId) {
-                            AuthManager.login(context, user)
-                            onSuccess(user.role)
-                        } else {
-                            // If device ID changed somehow, they need to logout/re-verify
-                            prefs.edit().clear().apply()
-                        }
-                    }
+                    AuthManager.login(context, user)
+                    onSuccess(user.role)
                 }
                 isLoggingIn = false
             }
@@ -210,8 +197,45 @@ fun LoginScreen(
     var mobile by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var enteredOtp by remember { mutableStateOf("") }
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
-    Surface(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    colors = listOf(
+                        androidx.compose.ui.graphics.Color(0xFF0A0B10), // Deep charcoal background
+                        androidx.compose.ui.graphics.Color(0xFF12131A)  // Dark space charcoal
+                    )
+                )
+            )
+            .drawBehind {
+                // Blur ambient lighting spot 1
+                drawCircle(
+                    brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(
+                            androidx.compose.ui.graphics.Color(0x3D4F7CFF), 
+                            androidx.compose.ui.graphics.Color.Transparent
+                        )
+                    ),
+                    radius = size.width * 0.9f,
+                    center = androidx.compose.ui.geometry.Offset(x = size.width * 0.1f, y = size.height * 0.2f)
+                )
+                // Blur ambient lighting spot 2
+                drawCircle(
+                    brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(
+                            androidx.compose.ui.graphics.Color(0x267B61FF), 
+                            androidx.compose.ui.graphics.Color.Transparent
+                        )
+                    ),
+                    radius = size.width * 0.8f,
+                    center = androidx.compose.ui.geometry.Offset(x = size.width * 0.9f, y = size.height * 0.8f)
+                )
+            }
+    ) {
         LaunchedEffect(Unit) {
             viewModel.checkAutoLogin(context) { role ->
                 if (role == UserRole.ADMIN) {
@@ -225,139 +249,408 @@ fun LoginScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .padding(24.dp)
+                .systemBarsPadding(),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("RecoveryX Pro", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            
-            Spacer(modifier = Modifier.height(32.dp))
-
-            if (!viewModel.otpRequired) {
-                // Standard Credentials form
-                OutlinedTextField(
-                    value = mobile,
-                    onValueChange = { mobile = it },
-                    label = { Text("Mobile Number") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Password") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                if (viewModel.error != null) {
-                    Text(viewModel.error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            // Header Logo & Branding with Gradient Accent
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .background(
+                            brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                                colors = listOf(
+                                    androidx.compose.ui.graphics.Color(0xFF4F7CFF),
+                                    androidx.compose.ui.graphics.Color(0xFF7B61FF)
+                                )
+                            ),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LockOpen,
+                        contentDescription = null,
+                        tint = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
+                Text(
+                    text = "RECOVERYX PRO",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = androidx.compose.ui.graphics.Color.White,
+                    letterSpacing = 1.5.sp
+                )
+            }
 
-                Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-                Button(
-                    onClick = {
-                        viewModel.login(context, mobile, password) { role ->
-                            if (role == UserRole.ADMIN) {
-                                onNavigateToAdmin()
-                            } else {
-                                onNavigateToSearch()
+            Text(
+                text = "Premium Vehicle Recovery Database",
+                style = MaterialTheme.typography.bodyMedium,
+                color = androidx.compose.ui.graphics.Color(0xFFA1A8B8),
+                fontWeight = FontWeight.Medium
+            )
+
+            Spacer(modifier = Modifier.height(36.dp))
+
+            // Visually Frosted Liquid Glass Card containing form
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = androidx.compose.ui.graphics.Color(0x1F1A2234) // Soft translucent base
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    androidx.compose.ui.graphics.Brush.linearGradient(
+                        colors = listOf(
+                            androidx.compose.ui.graphics.Color(0x3DFFFFFF), // Reflective top white border
+                            androidx.compose.ui.graphics.Color(0x0AFFFFFF)  // Very dark bottom edge
+                        )
+                    )
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (!viewModel.otpRequired) {
+                        Text(
+                            text = "Access Console",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = androidx.compose.ui.graphics.Color.White
+                        )
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        // Styled Input fields
+                        OutlinedTextField(
+                            value = mobile,
+                            onValueChange = { mobile = it },
+                            label = { Text("Mobile Number") },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Devices,
+                                    contentDescription = null,
+                                    tint = androidx.compose.ui.graphics.Color(0xFFA1A8B8)
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                unfocusedContainerColor = androidx.compose.ui.graphics.Color(0x0F0D111A),
+                                focusedContainerColor = androidx.compose.ui.graphics.Color(0x1F0D111A),
+                                unfocusedBorderColor = androidx.compose.ui.graphics.Color(0x1AFFFFFF),
+                                focusedBorderColor = androidx.compose.ui.graphics.Color(0xFF4F7CFF),
+                                unfocusedTextColor = androidx.compose.ui.graphics.Color.White,
+                                focusedTextColor = androidx.compose.ui.graphics.Color.White,
+                                unfocusedLabelColor = androidx.compose.ui.graphics.Color(0xFFA1A8B8),
+                                focusedLabelColor = androidx.compose.ui.graphics.Color(0xFF4F7CFF)
+                            )
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text("Password") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.LockOpen,
+                                    contentDescription = null,
+                                    tint = androidx.compose.ui.graphics.Color(0xFFA1A8B8)
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                unfocusedContainerColor = androidx.compose.ui.graphics.Color(0x0F0D111A),
+                                focusedContainerColor = androidx.compose.ui.graphics.Color(0x1F0D111A),
+                                unfocusedBorderColor = androidx.compose.ui.graphics.Color(0x1AFFFFFF),
+                                focusedBorderColor = androidx.compose.ui.graphics.Color(0xFF4F7CFF),
+                                unfocusedTextColor = androidx.compose.ui.graphics.Color.White,
+                                focusedTextColor = androidx.compose.ui.graphics.Color.White,
+                                unfocusedLabelColor = androidx.compose.ui.graphics.Color(0xFFA1A8B8),
+                                focusedLabelColor = androidx.compose.ui.graphics.Color(0xFF4F7CFF)
+                            )
+                        )
+
+                        if (viewModel.error != null) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = viewModel.error!!,
+                                color = androidx.compose.ui.graphics.Color(0xFFFF5D73),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(28.dp))
+
+                        // High fidelity gradient button
+                        Button(
+                            onClick = {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                                viewModel.login(context, mobile, password) { role ->
+                                    if (role == UserRole.ADMIN) {
+                                        onNavigateToAdmin()
+                                    } else {
+                                        onNavigateToSearch()
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = androidx.compose.ui.graphics.Color.Transparent
+                            ),
+                            contentPadding = PaddingValues(),
+                            enabled = !viewModel.isLoggingIn
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                                            colors = listOf(
+                                                androidx.compose.ui.graphics.Color(0xFF4F7CFF),
+                                                androidx.compose.ui.graphics.Color(0xFF7B61FF)
+                                            )
+                                        )
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (viewModel.isLoggingIn) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        color = androidx.compose.ui.graphics.Color.White
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Login to Account",
+                                        fontWeight = FontWeight.ExtraBold,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = androidx.compose.ui.graphics.Color.White
+                                    )
+                                }
                             }
                         }
-                    },
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !viewModel.isLoggingIn
-                ) {
-                    if (viewModel.isLoggingIn) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+
                     } else {
-                        Text("Login", modifier = Modifier.padding(4.dp))
+                        // OTP View & Device Register Form
+                        Icon(
+                            imageVector = Icons.Default.Devices,
+                            contentDescription = null,
+                            tint = androidx.compose.ui.graphics.Color(0xFF4F7CFF),
+                            modifier = Modifier.size(54.dp)
+                        )
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Text(
+                            text = "First Time Login", 
+                            style = MaterialTheme.typography.titleMedium, 
+                            fontWeight = FontWeight.Bold,
+                            color = androidx.compose.ui.graphics.Color.White
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Text(
+                            text = "Your device needs to be paired. Use the verification PIN generated below:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = androidx.compose.ui.graphics.Color(0xFFA1A8B8),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        )
+                        
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        // Ambient Glowing OTP display card
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = androidx.compose.ui.graphics.Color(0x334F7CFF)
+                            ),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color(0x664F7CFF)),
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        ) {
+                            Text(
+                                text = viewModel.generatedOtp, 
+                                style = MaterialTheme.typography.headlineLarge, 
+                                fontWeight = FontWeight.Black,
+                                color = androidx.compose.ui.graphics.Color.White,
+                                letterSpacing = 6.sp,
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        OutlinedTextField(
+                            value = enteredOtp,
+                            onValueChange = { enteredOtp = it },
+                            label = { Text("6-Digit OTP Code") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                unfocusedContainerColor = androidx.compose.ui.graphics.Color(0x0F0D111A),
+                                focusedContainerColor = androidx.compose.ui.graphics.Color(0x1F0D111A),
+                                unfocusedBorderColor = androidx.compose.ui.graphics.Color(0x1AFFFFFF),
+                                focusedBorderColor = androidx.compose.ui.graphics.Color(0xFF4F7CFF),
+                                unfocusedTextColor = androidx.compose.ui.graphics.Color.White,
+                                focusedTextColor = androidx.compose.ui.graphics.Color.White,
+                                unfocusedLabelColor = androidx.compose.ui.graphics.Color(0xFFA1A8B8),
+                                focusedLabelColor = androidx.compose.ui.graphics.Color(0xFF4F7CFF)
+                            )
+                        )
+
+                        if (viewModel.error != null) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = viewModel.error!!, 
+                                color = androidx.compose.ui.graphics.Color(0xFFFF5D73), 
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        Button(
+                            onClick = {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                                viewModel.verifyOtpAndRegisterDevice(context, enteredOtp) { role ->
+                                    if (role == UserRole.ADMIN) {
+                                        onNavigateToAdmin()
+                                    } else {
+                                        onNavigateToSearch()
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = androidx.compose.ui.graphics.Color.Transparent
+                            ),
+                            contentPadding = PaddingValues(),
+                            enabled = !viewModel.isVerifying
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                                            colors = listOf(
+                                                androidx.compose.ui.graphics.Color(0xFF4F7CFF),
+                                                androidx.compose.ui.graphics.Color(0xFF7B61FF)
+                                            )
+                                        )
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (viewModel.isVerifying) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp), 
+                                        color = androidx.compose.ui.graphics.Color.White
+                                    )
+                                } else {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.LockOpen, 
+                                            contentDescription = null, 
+                                            tint = androidx.compose.ui.graphics.Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Verify & Pair Device", 
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = androidx.compose.ui.graphics.Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        TextButton(
+                            onClick = {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                                viewModel.cancelOtp()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Go Back", 
+                                color = androidx.compose.ui.graphics.Color(0xFFA1A8B8), 
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
-            } else {
-                // OTP View & Device Register Form
+            }
+        }
+
+        // Frosted Full-screen Loader Overlay
+        if (viewModel.isLoggingIn || viewModel.isVerifying) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
+                    .clickable(enabled = false) {},
+                contentAlignment = Alignment.Center
+            ) {
                 Card(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    colors = CardDefaults.cardColors(
+                        containerColor = androidx.compose.ui.graphics.Color(0xFF131929)
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color(0x33FFFFFF)),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                    modifier = Modifier.width(180.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        Icon(Icons.Default.Devices, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("First Time Login Detected", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "This device needs to be verified & registered. A simulated OTP SMS code has been generated & shown below:",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(horizontal = 8.dp)
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(40.dp),
+                            color = androidx.compose.ui.graphics.Color(0xFF4F7CFF),
+                            strokeWidth = 4.dp
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            viewModel.generatedOtp, 
-                            style = MaterialTheme.typography.headlineLarge, 
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 4.sp
+                            text = if (viewModel.isVerifying) "Verifying..." else "Authorizing...",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = androidx.compose.ui.graphics.Color.White
                         )
                     }
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                OutlinedTextField(
-                    value = enteredOtp,
-                    onValueChange = { enteredOtp = it },
-                    label = { Text("Enter OTP Code") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                if (viewModel.error != null) {
-                    Text(viewModel.error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Button(
-                    onClick = {
-                        viewModel.verifyOtpAndRegisterDevice(context, enteredOtp) { role ->
-                            if (role == UserRole.ADMIN) {
-                                onNavigateToAdmin()
-                            } else {
-                                onNavigateToSearch()
-                            }
-                        }
-                    },
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !viewModel.isVerifying
-                ) {
-                    if (viewModel.isVerifying) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.LockOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Verify & Register Device")
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                TextButton(
-                    onClick = { viewModel.cancelOtp() },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Go Back")
                 }
             }
         }

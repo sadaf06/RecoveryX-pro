@@ -28,13 +28,11 @@ class MainViewModel(private val repository: DatabaseRepository) : ViewModel() {
                         mobile = "admin",
                         passwordHash = "admin123", // mocked password
                         role = UserRole.ADMIN,
-                        status = UserStatus.ACTIVE
+                        status = UserStatus.ACTIVE,
+                        email = "superadmin@system.local"
                     )
                 )
             }
-            
-            // Sync vehicles
-            repository.syncVehiclesFromFirestore()
         }
     }
 

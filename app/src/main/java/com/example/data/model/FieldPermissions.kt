@@ -5,7 +5,8 @@ import androidx.room.PrimaryKey
 
 @Entity(tableName = "field_permissions")
 data class FieldPermissions(
-    @PrimaryKey val role: UserRole, // e.g. NORMAL_USER
+    @PrimaryKey val roleString: String, // e.g. "NORMAL_USER_admin" or "NORMAL_USER_<creatorMobile>"
+    val role: UserRole, // NORMAL_USER
     val showCustomerName: Boolean = true,
     val showVehicleNumber: Boolean = true,
     val showBankName: Boolean = true,
@@ -13,5 +14,8 @@ data class FieldPermissions(
     val showEmi: Boolean = false,
     val showEngineNumber: Boolean = false,
     val showChassisNumber: Boolean = false,
-    val showConfirmerName: Boolean = false
+    val showConfirmerName: Boolean = false,
+    val showLoanNo: Boolean = false,
+    val showBucket: Boolean = false,
+    val showFileName: Boolean = false
 )

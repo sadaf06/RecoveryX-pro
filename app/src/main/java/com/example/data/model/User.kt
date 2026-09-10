@@ -26,5 +26,6 @@ data class User(
     val status: UserStatus = UserStatus.ACTIVE,
     val registeredDeviceId: String = "",
     val isFirstTime: Boolean = true,
-    val creatorMobile: String = "admin"
+    val creatorMobile: String = "admin",
+    val email: String = ""
 )

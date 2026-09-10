@@ -17,13 +17,26 @@ import com.example.data.model.SearchHistory
 
 class Converters {
     @TypeConverter
-    fun toUserRole(value: String): UserRole = enumValueOf(value)
+    fun toUserRole(value: String): UserRole {
+        return try {
+            enumValueOf(value)
+        } catch (e: Exception) {
+            // Web app may store SUPER_ADMIN which has no Android enum entry
+            if (value == "SUPER_ADMIN") UserRole.ADMIN else UserRole.NORMAL_USER
+        }
+    }
     
     @TypeConverter
     fun fromUserRole(value: UserRole): String = value.name
 
     @TypeConverter
-    fun toUserStatus(value: String): UserStatus = enumValueOf(value)
+    fun toUserStatus(value: String): UserStatus {
+        return try {
+            enumValueOf(value)
+        } catch (e: Exception) {
+            UserStatus.ACTIVE
+        }
+    }
     
     @TypeConverter
     fun fromUserStatus(value: UserStatus): String = value.name

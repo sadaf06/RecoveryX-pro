@@ -7,6 +7,7 @@ import com.example.data.dao.SearchHistoryDao
 import com.example.data.model.FieldPermissions
 import com.example.data.model.User
 import com.example.data.model.UserRole
+import com.example.data.model.Subscription
 import com.example.data.model.Vehicle
 import com.example.data.model.SearchHistory
 import kotlinx.coroutines.CoroutineScope
@@ -308,6 +309,15 @@ class DatabaseRepository(
                 e.printStackTrace()
             }
         }
+    }
+
+    // Subscriptions (Firestore-only, no local Room cache — checked online, fail-open offline)
+    suspend fun getSubscription(adminMobile: String): Subscription? {
+        return firestoreSyncManager?.getSubscription(adminMobile)
+    }
+
+    suspend fun saveSubscription(sub: Subscription) {
+        firestoreSyncManager?.saveSubscription(sub)
     }
 
     // Search History Logs

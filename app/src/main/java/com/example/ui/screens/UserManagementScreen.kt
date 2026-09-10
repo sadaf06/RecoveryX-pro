@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
 class UserManagementViewModel(private val repository: DatabaseRepository) : ViewModel() {
     val users = repository.allUsers.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     var isSyncing by mutableStateOf(false)
+    var subsMap by mutableStateOf<Map<String, com.example.data.model.Subscription?>>(emptyMap())
 
     fun saveUser(user: User) {
         viewModelScope.launch {
@@ -64,8 +65,73 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
         }
     }
 
-    fun syncFromCloud(context: android.content.Context? = null, showResult: Boolean = false) {
-        if (isSyncing) return
+        fun loadSubscriptions(adminMobiles: List<String>) {
+        viewModelScope.launch {
+            try {
+                val map = mutableMapOf<String, com.example.data.model.Subscription?>()
+                for (m in adminMobiles) {
+                    map[m] = try { repository.getSubscription(m) } catch (e: Exception) { null }
+                }
+                subsMap = map
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun extendSubscription(adminMobile: String, days: Int, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                val existing = try { repository.getSubscription(adminMobile) } catch (e: Exception) { null }
+                // Stack only onto a live paid plan; trial/expired restarts from today
+                val stacking = existing != null && existing.status == "ACTIVE" &&
+                        !existing.planName.startsWith("TRIAL_") && existing.expiresAt > now
+                val base = if (stacking) existing!!.expiresAt else now
+                val sub = com.example.data.model.Subscription(
+                    adminMobile = adminMobile,
+                    planName = "${days}D",
+                    startsAt = if (stacking) existing!!.startsAt else now,
+                    expiresAt = base + days * 86400000L,
+                    status = "ACTIVE",
+                    updatedAt = now,
+                    updatedBy = com.example.logic.AuthManager.currentUser.value?.mobile ?: "admin"
+                )
+                repository.saveSubscription(sub)
+                subsMap = subsMap + (adminMobile to sub)
+                onResult(true, "Recharge done: +$days days.")
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onResult(false, "Recharge failed: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    fun blockSubscription(adminMobile: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                val existing = try { repository.getSubscription(adminMobile) } catch (e: Exception) { null }
+                val sub = com.example.data.model.Subscription(
+                    adminMobile = adminMobile,
+                    planName = existing?.planName ?: "NONE",
+                    startsAt = existing?.startsAt ?: now,
+                    expiresAt = existing?.expiresAt ?: now,
+                    status = "EXPIRED",
+                    updatedAt = now,
+                    updatedBy = com.example.logic.AuthManager.currentUser.value?.mobile ?: "admin"
+                )
+                repository.saveSubscription(sub)
+                subsMap = subsMap + (adminMobile to sub)
+                onResult(true, "Subscription blocked.")
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onResult(false, "Block failed: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    fun syncFromCloud(context: android.content.Context? = null, showResult: Boolean = false) {        if (isSyncing) return
         isSyncing = true
         viewModelScope.launch {
             try {
@@ -109,6 +175,15 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var expandedAdmins by remember { mutableStateOf(setOf<String>()) }
+
+    // Super admin: pull recharge status for admin nodes shown on screen
+    val rechargeMobiles = remember(displayedUsers, currentUser) {
+        if (currentUser?.mobile == "admin") displayedUsers.filter { it.role == UserRole.ADMIN }.map { it.mobile }
+        else emptyList()
+    }
+    LaunchedEffect(rechargeMobiles) {
+        if (rechargeMobiles.isNotEmpty()) viewModel.loadSubscriptions(rechargeMobiles)
+    }
 
     // Filter rules
     val displayedUsers = remember(allUsersList, currentUser, selectedTab) {
@@ -262,7 +337,25 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
                                     onExpandToggle = {
                                         expandedAdmins = if (isExpanded) expandedAdmins - uAdmin.mobile else expandedAdmins + uAdmin.mobile
                                     },
-                                    onDeleteClick = { userToDeleteByCard = uAdmin }
+                                    onDeleteClick = { userToDeleteByCard = uAdmin },
+                                    footer = {
+                                        if (currentUser?.mobile == "admin" && uAdmin.role == UserRole.ADMIN) {
+                                            RechargeControls(
+                                                adminMobile = uAdmin.mobile,
+                                                sub = viewModel.subsMap[uAdmin.mobile],
+                                                onExtend = { d ->
+                                                    viewModel.extendSubscription(uAdmin.mobile, d) { _, msg ->
+                                                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                onBlock = {
+                                                    viewModel.blockSubscription(uAdmin.mobile) { _, msg ->
+                                                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
                                 ) {
                                     if (isExpanded) {
                                         Spacer(modifier = Modifier.height(12.dp))
@@ -428,13 +521,128 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
 }
 
 @Composable
+fun RechargeControls(
+    adminMobile: String,
+    sub: com.example.data.model.Subscription?,
+    onExtend: (Int) -> Unit,
+    onBlock: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var customDays by remember { mutableStateOf("") }
+    val exempt = adminMobile == "admin"
+    val state = com.example.logic.SubscriptionGate.state(sub)
+
+    val (badgeText, badgeColor) = when {
+        exempt -> "EXEMPT" to Color(0xFFA1A8B8)
+        state == com.example.logic.SubscriptionGate.State.NONE -> "NO RECHARGE" to Color(0xFFA1A8B8)
+        state == com.example.logic.SubscriptionGate.State.BLOCKED -> "BLOCKED" to Color(0xFFFF5D73)
+        state == com.example.logic.SubscriptionGate.State.EXPIRING ->
+            "${com.example.logic.SubscriptionGate.daysLeft(sub!!)}D LEFT" to Color(0xFFFFB020)
+        else -> "${com.example.logic.SubscriptionGate.daysLeft(sub!!)}D LEFT" to Color(0xFF4FD1FF)
+    }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "RECHARGE",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFFA1A8B8),
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Box(
+                modifier = Modifier
+                    .background(badgeColor.copy(alpha = 0.15f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text(badgeText, style = MaterialTheme.typography.labelSmall, color = badgeColor, fontWeight = FontWeight.Black)
+            }
+        }
+        if (sub != null && state != com.example.logic.SubscriptionGate.State.NONE) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "${sub.planName} • valid till ${java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date(sub.expiresAt))}",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFA1A8B8)
+            )
+        }
+        if (!exempt) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(30, 90, 365).forEach { d ->
+                    androidx.compose.material3.Button(
+                        onClick = { onExtend(d) },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF1FBF6B).copy(alpha = 0.15f),
+                            contentColor = Color(0xFF4FD1FF)
+                        )
+                    ) {
+                        Text("+$d", fontWeight = FontWeight.Bold)
+                    }
+                }
+                if (state == com.example.logic.SubscriptionGate.State.ACTIVE ||
+                    state == com.example.logic.SubscriptionGate.State.EXPIRING) {
+                    androidx.compose.material3.Button(
+                        onClick = onBlock,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFF5D73).copy(alpha = 0.15f),
+                            contentColor = Color(0xFFFF5D73)
+                        )
+                    ) {
+                        Text("BLOCK", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = customDays,
+                    onValueChange = { customDays = it.filter { c -> c.isDigit() }.take(4) },
+                    label = { Text("Custom days") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                    ),
+                    modifier = Modifier.weight(1f),
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                androidx.compose.material3.Button(
+                    onClick = {
+                        val days = customDays.toIntOrNull()
+                        if (days == null || days < 1 || days > 3650) {
+                            android.widget.Toast.makeText(context, "Enter days between 1 and 3650", android.widget.Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        onExtend(days)
+                        customDays = ""
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1FBF6B).copy(alpha = 0.15f),
+                        contentColor = Color(0xFF4FD1FF)
+                    )
+                ) {
+                    Text("ADD", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun PremiumUserCard(
     user: User, 
     isExpanded: Boolean, 
     onManage: () -> Unit, 
     onExpandToggle: () -> Unit, 
     onDeleteClick: () -> Unit,
-    content: @Composable () -> Unit = {}
+    content: @Composable () -> Unit = {},
+    footer: @Composable () -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -505,6 +713,7 @@ fun PremiumUserCard(
                 }
             }
             content()
+            footer()
         }
     }
 }

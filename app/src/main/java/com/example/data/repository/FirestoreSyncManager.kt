@@ -7,10 +7,29 @@ import com.example.data.model.Vehicle
 import com.example.data.model.SearchHistory
 import com.example.data.model.SearchCriteria
 import com.example.data.model.FieldPermissions
+import com.example.data.model.Subscription
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
 
 class FirestoreSyncManager {
+
+    // Web app can store SUPER_ADMIN (no such role on Android) — map safely
+    // instead of crashing on enumValueOf.
+    private fun parseUserRole(value: String): UserRole {
+        return try {
+            enumValueOf<UserRole>(value)
+        } catch (e: Exception) {
+            if (value == "SUPER_ADMIN") UserRole.ADMIN else UserRole.NORMAL_USER
+        }
+    }
+
+    private fun parseUserStatus(value: String): UserStatus {
+        return try {
+            enumValueOf<UserStatus>(value)
+        } catch (e: Exception) {
+            UserStatus.ACTIVE
+        }
+    }
     
     private val db: FirebaseFirestore by lazy {
         val firestore = FirebaseFirestore.getInstance()
@@ -99,8 +118,8 @@ class FirestoreSyncManager {
             name = name,
             mobile = mobile,
             passwordHash = pass,
-            role = enumValueOf(roleStr),
-            status = enumValueOf(statusStr),
+            role = parseUserRole(roleStr),
+            status = parseUserStatus(statusStr),
             registeredDeviceId = reqDeviceId,
             isFirstTime = isFirstTime,
             creatorMobile = creatorMobile,
@@ -125,8 +144,8 @@ class FirestoreSyncManager {
                 name = name,
                 mobile = num,
                 passwordHash = pass,
-                role = enumValueOf(roleStr),
-                status = enumValueOf(statusStr),
+                role = parseUserRole(roleStr),
+                status = parseUserStatus(statusStr),
                 registeredDeviceId = reqDeviceId,
                 isFirstTime = isFirstTime,
                 creatorMobile = creatorMobile,
@@ -451,6 +470,36 @@ class FirestoreSyncManager {
                 e.printStackTrace()
             }
         }
+    }
+
+    // Subscriptions (admin-level recharge gate, shared with web app)
+    private val subscriptionsCollection get() = db.collection("subscriptions")
+
+    suspend fun getSubscription(adminMobile: String): Subscription? {
+        val doc = subscriptionsCollection.document(adminMobile).get().await()
+        if (!doc.exists()) return null
+        return Subscription(
+            adminMobile = doc.id,
+            planName = doc.getString("plan_name") ?: "",
+            startsAt = doc.getLong("starts_at") ?: 0L,
+            expiresAt = doc.getLong("expires_at") ?: 0L,
+            status = doc.getString("status") ?: "EXPIRED",
+            updatedAt = doc.getLong("updated_at") ?: 0L,
+            updatedBy = doc.getString("updated_by") ?: ""
+        )
+    }
+
+    suspend fun saveSubscription(sub: Subscription) {
+        val mappedData = hashMapOf(
+            "admin_mobile" to sub.adminMobile,
+            "plan_name" to sub.planName,
+            "starts_at" to sub.startsAt,
+            "expires_at" to sub.expiresAt,
+            "status" to sub.status,
+            "updated_at" to sub.updatedAt,
+            "updated_by" to sub.updatedBy
+        )
+        subscriptionsCollection.document(sub.adminMobile).set(mappedData).await()
     }
 
     fun listenToPermissions(onPermissionsChanged: (List<FieldPermissions>) -> Unit): com.google.firebase.firestore.ListenerRegistration {

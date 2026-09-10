@@ -51,8 +51,21 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
         if (userJson != null) {
             try {
                 val user = kotlinx.serialization.json.Json.decodeFromString<com.example.data.model.User>(userJson)
-                AuthManager.login(context, user)
-                onSuccess(user.role)
+                viewModelScope.launch {
+                    val subOk = try {
+                        com.example.logic.SubscriptionGate.check(repository, user).ok
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        true
+                    }
+                    if (!subOk) {
+                        prefs.edit().clear().apply()
+                        error = "No active subscription. Please recharge to continue."
+                        return@launch
+                    }
+                    AuthManager.login(context, user)
+                    onSuccess(user.role)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 prefs.edit().clear().apply()
@@ -62,8 +75,19 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
                 isLoggingIn = true
                 val user = repository.getUserByMobile(mobile)
                 if (user != null) {
-                    AuthManager.login(context, user)
-                    onSuccess(user.role)
+                    val subOk = try {
+                        com.example.logic.SubscriptionGate.check(repository, user).ok
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        true
+                    }
+                    if (!subOk) {
+                        prefs.edit().clear().apply()
+                        error = "No active subscription. Please recharge to continue."
+                    } else {
+                        AuthManager.login(context, user)
+                        onSuccess(user.role)
+                    }
                 }
                 isLoggingIn = false
             }
@@ -101,6 +125,17 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
             if (user != null && user.passwordHash == pass) {
                 if (user.status == com.example.data.model.UserStatus.DISABLED) {
                     error = "Account is deactivated. Contact Admin."
+                    return@launch
+                }
+
+                // Subscription gate: recharge khatm -> login band (super admin exempt)
+                val subCheck = try {
+                    com.example.logic.SubscriptionGate.check(repository, user)
+                } catch (e: Exception) {
+                    null
+                }
+                if (subCheck != null && !subCheck.ok) {
+                    error = "No active subscription. Please recharge to continue."
                     return@launch
                 }
 
@@ -145,6 +180,18 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
             error = null
             viewModelScope.launch {
                 try {
+                    // Re-check subscription before completing first-time setup
+                    val subCheck = try {
+                        com.example.logic.SubscriptionGate.check(repository, user)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (subCheck != null && !subCheck.ok) {
+                        error = "No active subscription. Please recharge to continue."
+                        isVerifying = false
+                        return@launch
+                    }
+
                     val currentDeviceId = android.provider.Settings.Secure.getString(
                         context.contentResolver,
                         android.provider.Settings.Secure.ANDROID_ID

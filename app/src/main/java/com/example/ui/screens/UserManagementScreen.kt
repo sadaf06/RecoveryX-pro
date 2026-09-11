@@ -356,9 +356,9 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
                                                 }
                                             )
                                         }
-                                    }
-                                ) {
-                                    if (isExpanded) {
+                                    },
+                                    content = {
+                                        if (isExpanded) {
                                         Spacer(modifier = Modifier.height(12.dp))
                                         HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
                                         Spacer(modifier = Modifier.height(12.dp))
@@ -387,7 +387,7 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
                                             }
                                         }
                                     }
-                                }
+                                )
                             }
                         }
                     } else {

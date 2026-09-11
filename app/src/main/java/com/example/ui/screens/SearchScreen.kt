@@ -109,12 +109,6 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
              _isSearching.value = false
          }
     }
-             }
-        } else {
-             _searchResults.value = emptyList()
-             _isSearching.value = false
-         }
-    }
 
     class Factory(private val repository: DatabaseRepository) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")

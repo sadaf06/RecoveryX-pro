@@ -69,15 +69,20 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
     fun loadUploadedFiles(context: android.content.Context) {
         viewModelScope.launch {
             try {
+                val isSuper = com.example.logic.AuthManager.currentUser.value?.mobile == "admin"
                 if (com.example.logic.NetworkUtils.isNetworkAvailable(context)) {
-                    uploadedFiles = repository.getFirestoreUploadedFiles(adminMobile)
+                    // Super admin sees EVERY admin's files (null = no filter)
+                    uploadedFiles = repository.getFirestoreUploadedFiles(if (isSuper) null else adminMobile)
                 } else {
-                    uploadedFiles = repository.getLocalUploadedFiles(adminMobile, context)
+                    uploadedFiles = if (isSuper) repository.getAllLocalUploadedFiles(context)
+                    else repository.getLocalUploadedFiles(adminMobile, context)
                 }
             } catch (e: Exception) {
                 Log.e("ImportData", "Error getting uploaded files", e)
                 try {
-                    uploadedFiles = repository.getLocalUploadedFiles(adminMobile, context)
+                    val isSuper = com.example.logic.AuthManager.currentUser.value?.mobile == "admin"
+                    uploadedFiles = if (isSuper) repository.getAllLocalUploadedFiles(context)
+                    else repository.getLocalUploadedFiles(adminMobile, context)
                 } catch (inner: Exception) {
                     uploadedFiles = emptyList()
                 }
@@ -153,6 +158,16 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
     fun clearStaged() {
         stagedUri = null
         stagedFileName = ""
+    }
+
+    fun loadUploaderNames() {
+        viewModelScope.launch {
+            try {
+                uploaderNames = repository.allUsers.first().associate { it.mobile to it.name }
+            } catch (e: Exception) {
+                Log.e("ImportData", "Error loading uploader names", e)
+            }
+        }
     }
 
     fun loadUploaderNames() {

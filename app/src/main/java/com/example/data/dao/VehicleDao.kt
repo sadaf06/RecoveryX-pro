@@ -55,6 +55,9 @@ interface VehicleDao {
     @Query("SELECT fileName, COUNT(*) as recordCount FROM vehicles WHERE creatorMobile = :creatorMobile AND fileName != '' GROUP BY fileName")
     suspend fun getLocalFilesSummary(creatorMobile: String): List<LocalFileSummary>
 
+    @Query("SELECT creatorMobile, fileName, COUNT(*) as recordCount FROM vehicles WHERE fileName != '' GROUP BY creatorMobile, fileName")
+    suspend fun getAllLocalFilesSummary(): List<LocalFileSummaryWithOwner>
+
     @Query("SELECT COUNT(*) FROM vehicles WHERE creatorMobile = :creatorMobile AND fileName = :fileName")
     suspend fun countVehiclesByFile(creatorMobile: String, fileName: String): Int
 
@@ -66,6 +69,12 @@ interface VehicleDao {
 }
 
 data class LocalFileSummary(
+    val fileName: String,
+    val recordCount: Int
+)
+
+data class LocalFileSummaryWithOwner(
+    val creatorMobile: String,
     val fileName: String,
     val recordCount: Int
 )

@@ -236,6 +236,21 @@ class DatabaseRepository(
         }.sortedByDescending { it.uploadedAt }
     }
 
+    // Super admin: all local files across every admin (offline fallback)
+    suspend fun getAllLocalUploadedFiles(context: android.content.Context): List<UploadedFileMeta> {
+        val summaries = vehicleDao.getAllLocalFilesSummary()
+        val prefs = context.getSharedPreferences("recoveryx_prefs", android.content.Context.MODE_PRIVATE)
+        return summaries.map { s ->
+            val time = prefs.getLong("file_time_${s.creatorMobile}_${s.fileName}", System.currentTimeMillis())
+            UploadedFileMeta(
+                fileName = s.fileName,
+                adminMobile = s.creatorMobile,
+                uploadedAt = time,
+                recordCount = s.recordCount
+            )
+        }.sortedByDescending { it.uploadedAt }
+    }
+
     suspend fun uploadFileMetadataAndVehicles(adminMobile: String, fileName: String, vehicles: List<Vehicle>) {
         firestoreSyncManager?.let { sync ->
             sync.saveFileMetadata(adminMobile, fileName, vehicles.size)

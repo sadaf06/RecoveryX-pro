@@ -59,6 +59,7 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
     var stagedFileName by mutableStateOf("")
     var activeFileName by mutableStateOf("")
     var importStep by mutableStateOf(0)
+    var importProgress by mutableStateOf(0)
     var uploaderNames by mutableStateOf<Map<String, String>>(emptyMap())
 
     val IMPORT_STEPS = listOf("Checking file", "Parsing rows", "Saving & uploading")
@@ -175,6 +176,7 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
             isImporting = true
             stagedUri = null
             importStep = 0
+            importProgress = 5
             statusMessage = "Resolving file..."
             try {
                 val fileName = getFileNameFromUri(context, uri)
@@ -226,11 +228,19 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
                     return@launch
                 }
 
-                // 2. Save records locally into Room database first (always!)
+                // 2. Save records locally into Room database first (always, no cloud push).
+                // Local-only insert: the batch upload below writes everything once (no double-upload).
                 statusMessage = "Saving ${vehicles.size} records locally..."
                 importStep = 2
+                importProgress = 30
                 withContext(Dispatchers.IO) {
-                    vehicles.forEach { repository.insertVehicle(it) }
+                    vehicles.forEachIndexed { index, v ->
+                        repository.insertVehicleLocal(v)
+                        // Progress 30 -> 55 across the local save, updated every 500 rows
+                        if ((index + 1) % 500 == 0 || index + 1 == vehicles.size) {
+                            importProgress = 30 + ((index + 1) * 25 / vehicles.size)
+                        }
+                    }
                 }
 
                 // Record local import timestamp in prefs
@@ -239,13 +249,19 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
                     .putLong("file_time_${activeAdminMobile}_${fileName}", System.currentTimeMillis())
                     .apply()
 
-                // 3. Upload to Firestore if online
+                // 3. Upload to Firestore if online (55 -> 100 across 500-record batches)
                 if (isOnline) {
                     statusMessage = "Syncing records to Firestore database..."
                     try {
                         withContext(Dispatchers.IO) {
-                            repository.uploadFileMetadataAndVehicles(activeAdminMobile, fileName, vehicles)
+                            repository.uploadFileMetadataAndVehicles(
+                                activeAdminMobile, fileName, vehicles
+                            ) { done, total ->
+                                importProgress = 55 + (done * 45 / total)
+                                statusMessage = "Uploading batch $done of $total (${vehicles.size} records)..."
+                            }
                         }
+                        importProgress = 100
                         prefs.edit().putLong("last_download_time", System.currentTimeMillis()).apply()
                         statusMessage = "Successfully imported ${vehicles.size} records from '$fileName' globally and locally!"
                     } catch (e: Exception) {
@@ -253,6 +269,7 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
                         statusMessage = "Successfully imported ${vehicles.size} records locally! (Firestore sync pending once online)"
                     }
                 } else {
+                    importProgress = 100
                     statusMessage = "Successfully imported ${vehicles.size} records locally! (Device is offline - records will sync when online)"
                 }
 
@@ -858,6 +875,22 @@ fun ImportDataScreen(repository: DatabaseRepository, onBack: () -> Unit) {
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                             }
+                            LinearProgressIndicator(
+                                progress = { viewModel.importProgress / 100f },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp),
+                                color = Color(0xFF4F7CFF),
+                                trackColor = Color(0x33FFFFFF),
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${viewModel.importProgress}% Processing",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFA1A8B8)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
                             viewModel.IMPORT_STEPS.forEachIndexed { i, s ->
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     when {

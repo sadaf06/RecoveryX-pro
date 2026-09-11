@@ -265,10 +265,10 @@ class FirestoreSyncManager {
         }
     }
 
-    suspend fun uploadVehiclesBatch(vehicles: List<Vehicle>) {
+    suspend fun uploadVehiclesBatch(vehicles: List<Vehicle>, onChunk: ((done: Int, total: Int) -> Unit)? = null) {
         if (vehicles.isEmpty()) return
         val chunks = vehicles.chunked(500)
-        for (chunk in chunks) {
+        for ((index, chunk) in chunks.withIndex()) {
             val batch = db.batch()
             for (v in chunk) {
                 val docRef = vehiclesCollection.document()
@@ -292,6 +292,7 @@ class FirestoreSyncManager {
                 batch.set(docRef, mappedData)
             }
             batch.commit().await()
+            onChunk?.invoke(index + 1, chunks.size)
         }
     }
 

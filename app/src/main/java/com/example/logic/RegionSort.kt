@@ -27,9 +27,15 @@ object RegionSort {
         return KOTA_AREA_KEYWORDS.any { hay.contains(it) }
     }
 
-    fun sortKotaFirst(list: List<Vehicle>): List<Vehicle> =
-        list.sortedWith(
+    fun sortKotaFirst(list: List<Vehicle>): List<Vehicle> = sortKotaFirst(list, emptyMap())
+
+    fun sortKotaFirst(list: List<Vehicle>, fileTimes: Map<String, Long>): List<Vehicle> {
+        fun timeKey(v: Vehicle) = "${v.creatorMobile}__${v.fileName}"
+        return list.sortedWith(
             compareByDescending<Vehicle> { isKotaRegion(it) }
+                // Latest uploaded file first — new POS/bucket surfaces on top, zero extra reads
+                .thenByDescending { fileTimes[timeKey(it)] ?: 0L }
                 .thenBy { it.vehicleNumber.uppercase() }
         )
+    }
 }

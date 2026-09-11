@@ -257,10 +257,26 @@ class DatabaseRepository(
         }.sortedByDescending { it.uploadedAt }
     }
 
-    suspend fun uploadFileMetadataAndVehicles(adminMobile: String, fileName: String, vehicles: List<Vehicle>) {
+    suspend fun uploadFileMetadataAndVehicles(
+        adminMobile: String,
+        fileName: String,
+        vehicles: List<Vehicle>,
+        onChunk: ((done: Int, total: Int) -> Unit)? = null
+    ) {
         firestoreSyncManager?.let { sync ->
             sync.saveFileMetadata(adminMobile, fileName, vehicles.size)
-            sync.uploadVehiclesBatch(vehicles)
+            sync.uploadVehiclesBatch(vehicles, onChunk)
+        }
+    }
+
+    // Local-only insert (no Firestore push): avoids double-upload during import,
+    // since the batch upload below writes everything once.
+    suspend fun insertVehicleLocal(vehicle: Vehicle) {
+        val existing = vehicleDao.getVehicleByNumberInFile(vehicle.vehicleNumber, vehicle.fileName, vehicle.creatorMobile)
+        if (existing == null) {
+            vehicleDao.insertVehicle(vehicle.copy(id = 0))
+        } else {
+            vehicleDao.updateVehicle(vehicle.copy(id = existing.id, firestoreId = existing.firestoreId))
         }
     }
 

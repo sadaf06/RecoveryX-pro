@@ -44,7 +44,7 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
     private val _searchResults = MutableStateFlow<List<Vehicle>>(emptyList())
     val searchResults = _searchResults.asStateFlow()
 
-    private val _searchCriteria = MutableStateFlow(com.example.data.model.SearchCriteria.GENERAL)
+    private val _searchCriteria = MutableStateFlow(com.example.data.model.SearchCriteria.VEHICLE_LAST)
     val searchCriteria = _searchCriteria.asStateFlow()
 
     private val _isOnlineMode = MutableStateFlow(false)
@@ -60,6 +60,12 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
     private var lastQuery = ""
     private var lastCreatorFilter: String? = null
     private var lastIsOnline = false
+    // file key "creator__file" -> uploaded_at (one small fetch, reused for ranking)
+    var fileTimes: Map<String, Long> = emptyMap()
+
+    fun setFileTimes(map: Map<String, Long>) {
+        fileTimes = map
+    }
 
     fun selectCriteria(criteria: com.example.data.model.SearchCriteria, creatorFilter: String? = lastCreatorFilter) {
         _searchCriteria.value = criteria
@@ -79,30 +85,38 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
         currentSearchJob?.cancel()
         _searchError.value = ""
         
-        // Suffix / prefix matches can start with 1 digit
-        val minLength = if (criteria == com.example.data.model.SearchCriteria.GENERAL) 2 else 1
+        // Minimum 3 characters to start search (saves read quota)
+        val minLength = 3
         
         if (query.length >= minLength) {
              currentSearchJob = viewModelScope.launch {
-                 _isSearching.value = true
                  try {
-                     val fetched = if (isOnline) {
-                         // Server-side: only matching docs download (quota-safe)
-                         repository.searchVehiclesServer(query, criteria, creatorFilter)
-                     } else {
-                         // Offline: local Room cache
+                     // 1. Instant: offline cache matches show immediately
+                     val local = try {
                          repository.searchVehicles(query, criteria, creatorFilter).first()
+                     } catch (e: Exception) {
+                         emptyList<com.example.data.model.Vehicle>()
                      }
-                     val deduped = fetched.distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
+                     var combined = local.distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
+                     _searchResults.value = com.example.logic.RegionSort.sortKotaFirst(combined, fileTimes)
+                     // 2. Server hits merge in as they arrive (debounced, quota-safe)
                      if (isOnline) {
-                         // Auto-cache for offline use (local only, no write burn)
+                         _isSearching.value = true
+                         // Debounce: har keystroke pe query na jaye (read burn bachta hai)
+                         kotlinx.coroutines.delay(300)
                          try {
-                             repository.cacheServerVehicles(deduped)
+                             val server = repository.searchVehiclesServer(query, criteria, creatorFilter)
+                             try {
+                                 repository.cacheServerVehicles(server)
+                             } catch (e: Exception) {
+                                 e.printStackTrace()
+                             }
+                             combined = (combined + server).distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
+                             _searchResults.value = com.example.logic.RegionSort.sortKotaFirst(combined, fileTimes)
                          } catch (e: Exception) {
                              e.printStackTrace()
                          }
                      }
-                     _searchResults.value = com.example.logic.RegionSort.sortKotaFirst(deduped)
                  } catch (e: Exception) {
                      e.printStackTrace()
                      _searchError.value = e.localizedMessage ?: "Search failed"
@@ -176,6 +190,26 @@ fun SearchScreen(
             e.printStackTrace()
             null
         }
+        // File upload times for latest-first ranking (small fetch, reused)
+        try {
+            val online = com.example.logic.NetworkUtils.isNetworkAvailable(context)
+            val files = if (online) repository.getFirestoreUploadedFiles(adminFilter)
+            else if (adminFilter == null) repository.getAllLocalUploadedFiles(context)
+            else repository.getLocalUploadedFiles(adminFilter, context)
+            viewModel.setFileTimes(files.associate { "${it.adminMobile}__${it.fileName}" to it.uploadedAt })
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // Recent searches by this user (tap to re-run)
+    val allHistories by repository.getAllHistory().collectAsStateWithLifecycle(initialValue = emptyList())
+    val recentNumbers = remember(allHistories, currentUser) {
+        allHistories.filter { it.userMobile == currentUser?.mobile }
+            .sortedByDescending { it.timestamp }
+            .map { it.vehicleNumber }
+            .distinct()
+            .take(8)
     }
 
     LaunchedEffect(currentUser, isSyncing) {
@@ -661,6 +695,53 @@ fun SearchScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // Recent searches (tap to re-run) when query is blank
+                    if (searchQuery.isBlank() && recentNumbers.isNotEmpty()) {
+                        item(span = { GridItemSpan(2) }) {
+                            Column {
+                                Text(
+                                    text = "RECENT SEARCHES",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 1.sp,
+                                    color = androidx.compose.ui.graphics.Color(0xFFA1A8B8),
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                                androidx.compose.foundation.layout.FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    recentNumbers.forEach { num ->
+                                        androidx.compose.material3.SuggestionChip(
+                                            onClick = {
+                                                searchQuery = num
+                                                viewModel.search(
+                                                    num,
+                                                    creatorFilter = adminFilter,
+                                                    isOnline = com.example.logic.NetworkUtils.isNetworkAvailable(context)
+                                                )
+                                            },
+                                            label = {
+                                                Text(
+                                                    num,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            },
+                                            colors = androidx.compose.material3.SuggestionChipDefaults.suggestionChipColors(
+                                                containerColor = androidx.compose.ui.graphics.Color(0x14FFFFFF),
+                                                labelColor = androidx.compose.ui.graphics.Color.White
+                                            ),
+                                            border = androidx.compose.foundation.BorderStroke(
+                                                1.dp,
+                                                androidx.compose.ui.graphics.Color(0x334F7CFF)
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                     items(results) { vehicle ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -781,7 +862,7 @@ fun SearchScreen(
                             }
                         }
                     }
-                    val minLength = if (activeCriteria == com.example.data.model.SearchCriteria.GENERAL) 2 else 1
+                    val minLength = 3
                     if (results.isEmpty() && searchQuery.length >= minLength) {
                         item(span = { GridItemSpan(2) }) {
                             Box(

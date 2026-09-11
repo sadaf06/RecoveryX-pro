@@ -387,7 +387,8 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
                                             }
                                         }
                                     }
-                                )
+                                }
+                            )
                             }
                         }
                     } else {

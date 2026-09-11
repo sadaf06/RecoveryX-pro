@@ -170,16 +170,6 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
         }
     }
 
-    fun loadUploaderNames() {
-        viewModelScope.launch {
-            try {
-                uploaderNames = repository.allUsers.first().associate { it.mobile to it.name }
-            } catch (e: Exception) {
-                Log.e("ImportData", "Error loading uploader names", e)
-            }
-        }
-    }
-
     fun importPickedFile(context: android.content.Context, uri: Uri) {
         viewModelScope.launch {
             isImporting = true

@@ -82,10 +82,11 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
         if (query.length >= minLength) {
              currentSearchJob = viewModelScope.launch {
                  _isSearching.value = true
-                 repository.searchVehicles(query, criteria, creatorFilter).collect { results ->
-                     _searchResults.value = results.distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
-                     _isSearching.value = false
-                 }
+                  repository.searchVehicles(query, criteria, creatorFilter).collect { results ->
+                      val deduped = results.distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
+                      _searchResults.value = com.example.logic.RegionSort.sortKotaFirst(deduped)
+                      _isSearching.value = false
+                  }
              }
         } else {
              _searchResults.value = emptyList()
@@ -512,6 +513,9 @@ fun SearchScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                    ),
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         unfocusedContainerColor = androidx.compose.ui.graphics.Color(0x14FFFFFF),

@@ -332,9 +332,46 @@ class DatabaseRepository(
         }
     }
 
+    // Server-side era: SYNC no longer bulk-downloads (quota-safe).
+    // Refreshes small collections only; vehicles arrive per-search and get cached.
     // Subscriptions (Firestore-only, no local Room cache — checked online, fail-open offline)
     suspend fun getSubscription(adminMobile: String): Subscription? {
         return firestoreSyncManager?.getSubscription(adminMobile)
+    }
+
+    suspend fun syncSearchMetadata(creatorFilter: String?, permAdminMobile: String?) {
+        try {
+            syncUsersFromFirestore(creatorFilter)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        if (permAdminMobile != null) {
+            try {
+                syncPermissionsFromFirestore(permAdminMobile)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        try {
+            syncHistoriesFromFirestore(creatorFilter)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // Cache server results locally WITHOUT pushing back to Firestore
+    // (pushing would burn write quota on every search).
+    suspend fun cacheServerVehicles(vehicles: List<Vehicle>) {
+        for (v in vehicles) {
+            val existing = vehicleDao.getVehicleByNumberInFile(v.vehicleNumber, v.fileName, v.creatorMobile)
+            if (existing == null) {
+                vehicleDao.insertVehicle(v.copy(id = 0))
+            } else {
+                vehicleDao.updateVehicle(
+                    v.copy(id = existing.id, firestoreId = existing.firestoreId.ifEmpty { v.firestoreId })
+                )
+            }
+        }
     }
 
     suspend fun saveSubscription(sub: Subscription) {

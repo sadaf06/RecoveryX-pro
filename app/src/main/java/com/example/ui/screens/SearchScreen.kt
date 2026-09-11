@@ -86,16 +86,22 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
              currentSearchJob = viewModelScope.launch {
                  _isSearching.value = true
                  try {
-                     val deduped = if (isOnline) {
+                     val fetched = if (isOnline) {
                          // Server-side: only matching docs download (quota-safe)
                          repository.searchVehiclesServer(query, criteria, creatorFilter)
-                             .distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
-                      } else {
-                          // Offline: local Room cache
-                          repository.searchVehicles(query, criteria, creatorFilter)
-                              .first()
-                              .distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
-                      }
+                     } else {
+                         // Offline: local Room cache
+                         repository.searchVehicles(query, criteria, creatorFilter).first()
+                     }
+                     val deduped = fetched.distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
+                     if (isOnline) {
+                         // Auto-cache for offline use (local only, no write burn)
+                         try {
+                             repository.cacheServerVehicles(deduped)
+                         } catch (e: Exception) {
+                             e.printStackTrace()
+                         }
+                     }
                      _searchResults.value = com.example.logic.RegionSort.sortKotaFirst(deduped)
                  } catch (e: Exception) {
                      e.printStackTrace()
@@ -223,11 +229,13 @@ fun SearchScreen(
                                         currentUser?.role == com.example.data.model.UserRole.ADMIN -> currentUser?.mobile
                                         else -> currentUser?.creatorMobile?.ifEmpty { "admin" } ?: "admin"
                                     }
-                                    repository.forceSyncFromNetwork(filter)
+                                    // Metadata-only refresh (no bulk download — quota-safe).
+                                    // Vehicles arrive per-search and auto-cache for offline use.
+                                    repository.syncSearchMetadata(filter, filter)
                                     val prefs = context.getSharedPreferences("recoveryx_prefs", android.content.Context.MODE_PRIVATE)
                                     prefs.edit().putLong("last_download_time", System.currentTimeMillis()).apply()
                                     hasNewDataPending = false
-                                    android.widget.Toast.makeText(context, "Local search database synchronized!", android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, "Live search ready — metadata synced!", android.widget.Toast.LENGTH_SHORT).show()
                                 } catch (e: Exception) {
                                     android.widget.Toast.makeText(context, "Sync failed: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
                                 } finally {
@@ -310,7 +318,8 @@ fun SearchScreen(
                                                 currentUser?.role == com.example.data.model.UserRole.ADMIN -> currentUser?.mobile
                                                 else -> currentUser?.creatorMobile?.ifEmpty { "admin" } ?: "admin"
                                             }
-                                            repository.forceSyncFromNetwork(filter)
+                                            // Metadata-only refresh (no bulk download — quota-safe)
+                                            repository.syncSearchMetadata(filter, filter)
                                             val prefs = context.getSharedPreferences("recoveryx_prefs", android.content.Context.MODE_PRIVATE)
                                             prefs.edit().putLong("last_download_time", System.currentTimeMillis()).apply()
                                             hasNewDataPending = false

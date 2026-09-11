@@ -154,7 +154,89 @@ class FirestoreSyncManager {
         }
     }
 
-    // Vehicles Sync
+    // Normalized search helpers (server-side prefix search needs these stored fields)
+    private fun norm(value: String) = value.uppercase().replace("[\\s-]+".toRegex(), "")
+    private fun revNorm(value: String) = norm(value).reversed()
+
+    private fun vehicleSearchFields(v: Vehicle): Map<String, String> {
+        return mapOf(
+            "reg_norm" to norm(v.vehicleNumber),
+            "reg_rev" to revNorm(v.vehicleNumber),
+            "engine_norm" to norm(v.engineNumber),
+            "engine_rev" to revNorm(v.engineNumber),
+            "chassis_norm" to norm(v.chassisNumber),
+            "chassis_rev" to revNorm(v.chassisNumber),
+            "loan_norm" to norm(v.loanNo),
+            "owner_norm" to v.customerName.uppercase().trim()
+        )
+    }
+
+    private fun mapVehicleDoc(doc: com.google.firebase.firestore.DocumentSnapshot): Vehicle? {
+        val num = doc.getString("registration_number") ?: return null
+        val owner = doc.getString("owner") ?: ""
+        return Vehicle(
+            firestoreId = doc.id,
+            vehicleNumber = num,
+            customerName = owner,
+            model = doc.getString("model") ?: "",
+            status = doc.getString("status") ?: "Active",
+            bankName = doc.getString("bank_name") ?: "",
+            pos = doc.getString("pos") ?: "",
+            emi = doc.getString("emi") ?: "",
+            engineNumber = doc.getString("engine_number") ?: "",
+            chassisNumber = doc.getString("chassis_number") ?: "",
+            confirmerName = doc.getString("confirmer_name") ?: "",
+            loanNo = doc.getString("loan_no") ?: "",
+            creatorMobile = doc.getString("creator_mobile") ?: "admin",
+            fileName = doc.getString("file_name") ?: "",
+            bucket = doc.getString("bucket") ?: ""
+        )
+    }
+
+    // Server-side prefix search: only matching docs are downloaded (max 50 per
+    // field). No composite index needed (single-field range + limit). Creator
+    // scoping is applied in memory after fetch.
+    suspend fun searchServer(query: String, criteria: SearchCriteria, creatorFilter: String?): List<Vehicle> {
+        val normQuery = norm(query)
+        if (normQuery.isEmpty()) return emptyList()
+        val revQuery = normQuery.reversed()
+        val fields: List<Pair<String, String>> = when (criteria) {
+            SearchCriteria.VEHICLE_LAST -> listOf("reg_rev" to revQuery)
+            SearchCriteria.ENGINE_LAST -> listOf("engine_rev" to revQuery)
+            SearchCriteria.CHASSIS_LAST -> listOf("chassis_rev" to revQuery)
+            SearchCriteria.LOAN_START -> listOf("loan_norm" to normQuery)
+            SearchCriteria.GENERAL -> listOf(
+                "reg_norm" to normQuery,
+                "owner_norm" to query.uppercase().trim(),
+                "loan_norm" to normQuery,
+                "engine_rev" to revQuery,
+                "chassis_rev" to revQuery
+            )
+        }
+        val merged = mutableListOf<Vehicle>()
+        for ((field, prefix) in fields) {
+            if (prefix.isEmpty()) continue
+            try {
+                val snap = vehiclesCollection
+                    .orderBy(field)
+                    .startAt(prefix)
+                    .endAt(prefix + "\uf8ff")
+                    .limit(50)
+                    .get()
+                    .await()
+                snap.documents.mapNotNullTo(merged) { mapVehicleDoc(it) }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        var list = merged.distinctBy { it.firestoreId.ifEmpty { it.vehicleNumber } }
+        if (creatorFilter != null) {
+            list = list.filter { it.creatorMobile == creatorFilter }
+        }
+        return list.take(100)
+    }
+
+    // Vehicles Sync (uploads always include normalized search fields)
     suspend fun uploadVehicle(vehicle: Vehicle): String {
         val mappedData = hashMapOf(
             "registration_number" to vehicle.vehicleNumber,
@@ -172,6 +254,7 @@ class FirestoreSyncManager {
             "file_name" to vehicle.fileName,
             "bucket" to vehicle.bucket
         )
+        mappedData.putAll(vehicleSearchFields(vehicle))
         
         return if (vehicle.firestoreId.isNotEmpty()) {
             vehiclesCollection.document(vehicle.firestoreId).set(mappedData).await()
@@ -205,6 +288,7 @@ class FirestoreSyncManager {
                     "file_name" to v.fileName,
                     "bucket" to v.bucket
                 )
+                mappedData.putAll(vehicleSearchFields(v))
                 batch.set(docRef, mappedData)
             }
             batch.commit().await()

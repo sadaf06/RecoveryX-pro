@@ -58,10 +58,11 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
     private var currentSearchJob: kotlinx.coroutines.Job? = null
     private var lastQuery = ""
     private var lastCreatorFilter: String? = null
+    private var lastIsOnline = false
 
     fun selectCriteria(criteria: com.example.data.model.SearchCriteria, creatorFilter: String? = lastCreatorFilter) {
         _searchCriteria.value = criteria
-        search(lastQuery, criteria, creatorFilter)
+        search(lastQuery, criteria, creatorFilter, lastIsOnline)
     }
 
     fun toggleSearchMode(online: Boolean, creatorFilter: String? = lastCreatorFilter) {
@@ -70,9 +71,10 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
         search(lastQuery, _searchCriteria.value, creatorFilter)
     }
 
-    fun search(query: String, criteria: com.example.data.model.SearchCriteria = _searchCriteria.value, creatorFilter: String? = lastCreatorFilter) {
+    fun search(query: String, criteria: com.example.data.model.SearchCriteria = _searchCriteria.value, creatorFilter: String? = lastCreatorFilter, isOnline: Boolean = lastIsOnline) {
         lastQuery = query
         lastCreatorFilter = creatorFilter
+        lastIsOnline = isOnline
         currentSearchJob?.cancel()
         _searchError.value = ""
         
@@ -82,11 +84,31 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
         if (query.length >= minLength) {
              currentSearchJob = viewModelScope.launch {
                  _isSearching.value = true
-                  repository.searchVehicles(query, criteria, creatorFilter).collect { results ->
-                      val deduped = results.distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
-                      _searchResults.value = com.example.logic.RegionSort.sortKotaFirst(deduped)
-                      _isSearching.value = false
-                  }
+                 try {
+                     val deduped = if (isOnline) {
+                         // Server-side: only matching docs download (quota-safe)
+                         repository.searchVehiclesServer(query, criteria, creatorFilter)
+                             .distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
+                     } else {
+                         // Offline: local Room cache
+                         kotlinx.coroutines.flow.first(
+                             repository.searchVehicles(query, criteria, creatorFilter)
+                         ).distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
+                     }
+                     _searchResults.value = com.example.logic.RegionSort.sortKotaFirst(deduped)
+                 } catch (e: Exception) {
+                     e.printStackTrace()
+                     _searchError.value = e.localizedMessage ?: "Search failed"
+                     _searchResults.value = emptyList()
+                 } finally {
+                     _isSearching.value = false
+                 }
+             }
+        } else {
+             _searchResults.value = emptyList()
+             _isSearching.value = false
+         }
+    }
              }
         } else {
              _searchResults.value = emptyList()
@@ -496,7 +518,11 @@ fun SearchScreen(
                     value = searchQuery,
                     onValueChange = {
                         searchQuery = it
-                        viewModel.search(it, creatorFilter = adminFilter)
+                        viewModel.search(
+                            it,
+                            creatorFilter = adminFilter,
+                            isOnline = com.example.logic.NetworkUtils.isNetworkAvailable(context)
+                        )
                     },
                     placeholder = {
                         val placeholderText = when (activeCriteria) {

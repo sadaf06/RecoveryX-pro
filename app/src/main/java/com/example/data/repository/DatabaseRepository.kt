@@ -174,6 +174,12 @@ class DatabaseRepository(
     suspend fun searchVehiclesOnline(query: String, criteria: com.example.data.model.SearchCriteria = com.example.data.model.SearchCriteria.GENERAL, creatorFilter: String?): List<Vehicle> {
         return firestoreSyncManager?.searchVehiclesOnline(query, criteria, creatorFilter) ?: emptyList()
     }
+
+    // Server-side prefix search: downloads only matches (quota-safe for 40K+ datasets).
+    // Falls back to empty list offline — caller uses local Room search instead.
+    suspend fun searchVehiclesServer(query: String, criteria: com.example.data.model.SearchCriteria, creatorFilter: String?): List<Vehicle> {
+        return firestoreSyncManager?.searchServer(query, criteria, creatorFilter) ?: emptyList()
+    }
     fun getVehicleById(id: Int) = vehicleDao.getVehicleById(id)
     fun getVehiclesByNumber(number: String) = vehicleDao.getVehiclesByNumber(number)
     fun countAllVehiclesByAdmin(creatorMobile: String) = vehicleDao.countAllVehiclesByAdmin(creatorMobile)

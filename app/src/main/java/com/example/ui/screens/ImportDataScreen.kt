@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.UploadFile
@@ -34,9 +35,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.Vehicle
 import com.example.data.repository.DatabaseRepository
+import com.example.logic.AuthManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.apache.poi.ss.usermodel.WorkbookFactory
@@ -50,6 +54,14 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
     var uploadedFiles by mutableStateOf<List<com.example.data.repository.UploadedFileMeta>>(emptyList())
     var showDuplicateDialog by mutableStateOf(false)
     var duplicateErrorFileName by mutableStateOf("")
+    // Staged file waits for explicit UPLOAD press instead of auto-uploading
+    var stagedUri by mutableStateOf<Uri?>(null)
+    var stagedFileName by mutableStateOf("")
+    var activeFileName by mutableStateOf("")
+    var importStep by mutableStateOf(0)
+    var uploaderNames by mutableStateOf<Map<String, String>>(emptyMap())
+
+    val IMPORT_STEPS = listOf("Checking file", "Parsing rows", "Saving & uploading")
 
     val adminMobile: String
         get() = com.example.logic.AuthManager.currentUser.value?.mobile ?: "admin"
@@ -125,12 +137,43 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
         return name
     }
 
+    fun stagePickedFile(context: android.content.Context, uri: Uri) {
+        statusMessage = ""
+        val name = getFileNameFromUri(context, uri)
+        if (!(name.endsWith(".xlsx", ignoreCase = true) ||
+                    name.endsWith(".xls", ignoreCase = true) ||
+                    name.endsWith(".csv", ignoreCase = true))) {
+            statusMessage = "Error: Unsupported file '$name'. Only .xlsx, .xls, .csv allowed."
+            return
+        }
+        stagedUri = uri
+        stagedFileName = name
+    }
+
+    fun clearStaged() {
+        stagedUri = null
+        stagedFileName = ""
+    }
+
+    fun loadUploaderNames() {
+        viewModelScope.launch {
+            try {
+                uploaderNames = repository.allUsers.first().associate { it.mobile to it.name }
+            } catch (e: Exception) {
+                Log.e("ImportData", "Error loading uploader names", e)
+            }
+        }
+    }
+
     fun importPickedFile(context: android.content.Context, uri: Uri) {
         viewModelScope.launch {
             isImporting = true
+            stagedUri = null
+            importStep = 0
             statusMessage = "Resolving file..."
             try {
                 val fileName = getFileNameFromUri(context, uri)
+                activeFileName = fileName
                 val activeAdminMobile = adminMobile
                 val isOnline = com.example.logic.NetworkUtils.isNetworkAvailable(context)
                 
@@ -156,6 +199,7 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
                 }
 
                 statusMessage = "Parsing file elements..."
+                importStep = 1
                 val inputStream = context.contentResolver.openInputStream(uri)
                 if (inputStream == null) {
                     statusMessage = "Error: Could not open the selected file stream."
@@ -179,6 +223,7 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
 
                 // 2. Save records locally into Room database first (always!)
                 statusMessage = "Saving ${vehicles.size} records locally..."
+                importStep = 2
                 withContext(Dispatchers.IO) {
                     vehicles.forEach { repository.insertVehicle(it) }
                 }
@@ -206,6 +251,7 @@ class ImportDataViewModel(private val repository: DatabaseRepository) : ViewMode
                     statusMessage = "Successfully imported ${vehicles.size} records locally! (Device is offline - records will sync when online)"
                 }
 
+                importStep = 3
                 loadUploadedFiles(context)
             } catch (e: Throwable) {
                 Log.e("ImportData", "Error importing file", e)
@@ -581,8 +627,15 @@ fun ImportDataScreen(repository: DatabaseRepository, onBack: () -> Unit) {
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            viewModel.importPickedFile(context, it)
+            viewModel.stagePickedFile(context, it)
         }
+    }
+
+    val currentUser by AuthManager.currentUser.collectAsStateWithLifecycle()
+    val isSuperAdmin = currentUser?.mobile == "admin"
+
+    LaunchedEffect(isSuperAdmin) {
+        if (isSuperAdmin) viewModel.loadUploaderNames()
     }
 
     Box(
@@ -699,6 +752,56 @@ fun ImportDataScreen(repository: DatabaseRepository, onBack: () -> Unit) {
 
                         Spacer(modifier = Modifier.height(16.dp))
 
+                        // Staged file: explicit UPLOAD press
+                        if (viewModel.stagedUri != null && !viewModel.isImporting) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF4F7CFF).copy(alpha = 0.12f)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4F7CFF).copy(alpha = 0.4f))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = viewModel.stagedFileName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "Ready to upload",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFFA1A8B8)
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = { viewModel.clearStaged() },
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x33FFFFFF)),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text("REMOVE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(
+                                        onClick = {
+                                            viewModel.stagedUri?.let { viewModel.importPickedFile(context, it) }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F7CFF)),
+                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text("UPLOAD", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -726,6 +829,55 @@ fun ImportDataScreen(repository: DatabaseRepository, onBack: () -> Unit) {
                                 Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("DEMO", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
+                if (viewModel.isImporting) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                        color = Color(0xFF4FD1FF).copy(alpha = 0.08f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4FD1FF).copy(alpha = 0.3f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            if (viewModel.activeFileName.isNotEmpty()) {
+                                Text(
+                                    text = viewModel.activeFileName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                            viewModel.IMPORT_STEPS.forEachIndexed { i, s ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    when {
+                                        i < viewModel.importStep -> Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = Color(0xFF4FD1FF)
+                                        )
+                                        i == viewModel.importStep -> CircularProgressIndicator(
+                                            modifier = Modifier.size(14.dp),
+                                            color = Color(0xFF4FD1FF),
+                                            strokeWidth = 2.dp
+                                        )
+                                        else -> Spacer(modifier = Modifier.size(16.dp))
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = s,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (i <= viewModel.importStep) Color.White else Color(0xFFA1A8B8)
+                                    )
+                                }
+                                if (i < viewModel.IMPORT_STEPS.lastIndex) Spacer(modifier = Modifier.height(6.dp))
                             }
                         }
                     }
@@ -827,6 +979,15 @@ fun ImportDataScreen(repository: DatabaseRepository, onBack: () -> Unit) {
                                                 text = formatTimestamp(fileMeta.uploadedAt),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = Color(0xFFA1A8B8)
+                                            )
+                                        }
+                                        if (isSuperAdmin) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "UPLOADED BY: ${(viewModel.uploaderNames[fileMeta.adminMobile] ?: "UNKNOWN").uppercase()} • ${fileMeta.adminMobile}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFF4FD1FF),
+                                                fontWeight = FontWeight.Bold
                                             )
                                         }
                                     }

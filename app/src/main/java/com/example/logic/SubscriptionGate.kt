@@ -42,6 +42,25 @@ object SubscriptionGate {
     fun daysLeft(sub: Subscription): Int =
         ceil((sub.expiresAt - System.currentTimeMillis()) / 86400000.0).toInt()
 
+    // Precise countdown: "2 days 4 hours left" / "6 hours left" / "Expired"
+    fun formatTimeLeft(sub: Subscription): String {
+        val ms = sub.expiresAt - System.currentTimeMillis()
+        if (ms <= 0) return "Expired"
+        val days = (ms / 86400000L).toInt()
+        val hours = ((ms % 86400000L) / 3600000L).toInt()
+        return if (days <= 0) "$hours hour${if (hours == 1) "" else "s"} left"
+        else "$days day${if (days == 1) "" else "s"} $hours hour${if (hours == 1) "" else "s"} left"
+    }
+
+    // Compact for badges: "2d 4h left" / "6h left" / "Expired"
+    fun formatTimeLeftShort(sub: Subscription): String {
+        val ms = sub.expiresAt - System.currentTimeMillis()
+        if (ms <= 0) return "Expired"
+        val days = (ms / 86400000L).toInt()
+        val hours = ((ms % 86400000L) / 3600000L).toInt()
+        return if (days <= 0) "${hours}h left" else "${days}d ${hours}h left"
+    }
+
     enum class State { ACTIVE, EXPIRING, BLOCKED, NONE }
 
     fun state(sub: Subscription?): State {

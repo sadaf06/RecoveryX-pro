@@ -538,9 +538,8 @@ fun RechargeControls(
         exempt -> "EXEMPT" to Color(0xFFA1A8B8)
         state == com.example.logic.SubscriptionGate.State.NONE -> "NO RECHARGE" to Color(0xFFA1A8B8)
         state == com.example.logic.SubscriptionGate.State.BLOCKED -> "BLOCKED" to Color(0xFFFF5D73)
-        state == com.example.logic.SubscriptionGate.State.EXPIRING ->
-            "${com.example.logic.SubscriptionGate.daysLeft(sub!!)}D LEFT" to Color(0xFFFFB020)
-        else -> "${com.example.logic.SubscriptionGate.daysLeft(sub!!)}D LEFT" to Color(0xFF4FD1FF)
+        else -> com.example.logic.SubscriptionGate.formatTimeLeftShort(sub!!).uppercase() to
+            if (state == com.example.logic.SubscriptionGate.State.EXPIRING) Color(0xFFFFB020) else Color(0xFF4FD1FF)
     }
 
     Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {

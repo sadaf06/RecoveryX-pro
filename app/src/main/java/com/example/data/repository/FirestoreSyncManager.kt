@@ -320,6 +320,22 @@ class FirestoreSyncManager {
         }
     }
 
+    // Live total count via aggregation (cheap: ~1 read per 1000 docs).
+    // Used for dashboard counters without downloading everything.
+    suspend fun countVehicles(creatorMobile: String?): Long? {
+        return try {
+            val base: com.google.firebase.firestore.Query = if (creatorMobile != null) {
+                vehiclesCollection.whereEqualTo("creator_mobile", creatorMobile)
+            } else {
+                vehiclesCollection
+            }
+            base.count().get(com.google.firebase.firestore.AggregateSource.SERVER).await().count
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
     // Excel/CSV Files Metadata Sync
     private val filesCollection get() = db.collection("uploaded_files")
 

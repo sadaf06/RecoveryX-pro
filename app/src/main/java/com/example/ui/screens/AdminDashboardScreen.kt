@@ -102,6 +102,24 @@ fun AdminDashboardScreen(
     }
     
     var isLoggingOut by remember { mutableStateOf(false) }
+    var serverVehicleCount by remember { mutableStateOf<Long?>(null) }
+
+    // Live server total (cheap aggregation) — falls back to cached count offline
+    val countFilter = remember(currentUser) {
+        when {
+            currentUser?.mobile == "admin" -> null
+            currentUser?.role == com.example.data.model.UserRole.ADMIN -> currentUser?.mobile
+            else -> currentUser?.creatorMobile?.ifEmpty { "admin" } ?: "admin"
+        }
+    }
+    LaunchedEffect(countFilter) {
+        serverVehicleCount = try {
+            repository.countVehicles(countFilter)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -240,8 +258,8 @@ fun AdminDashboardScreen(
                 }
                 DashboardMetricCard(
                     title = "Tracked Vehicles Database",
-                    value = vehiclesCount.toString(),
-                    subtitle = "Synched from Cloud Firestore",
+                    value = serverVehicleCount?.toString() ?: vehiclesCount.toString(),
+                    subtitle = if (serverVehicleCount != null) "Live count from Cloud Firestore" else "Cached on this device",
                     icon = Icons.Default.DirectionsCar,
                     modifier = Modifier.fillMaxWidth(),
                     accentColor = Color(0xFF7B61FF)

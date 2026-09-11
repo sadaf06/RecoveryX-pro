@@ -339,6 +339,10 @@ class DatabaseRepository(
         return firestoreSyncManager?.getSubscription(adminMobile)
     }
 
+    suspend fun countVehicles(creatorMobile: String?): Long? {
+        return firestoreSyncManager?.countVehicles(creatorMobile)
+    }
+
     suspend fun syncSearchMetadata(creatorFilter: String?, permAdminMobile: String?) {
         try {
             syncUsersFromFirestore(creatorFilter)

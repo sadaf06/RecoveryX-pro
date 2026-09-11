@@ -35,6 +35,7 @@ import com.example.data.repository.DatabaseRepository
 import com.example.logic.AuthManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.Vehicle
 import kotlinx.coroutines.launch
@@ -89,12 +90,12 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
                          // Server-side: only matching docs download (quota-safe)
                          repository.searchVehiclesServer(query, criteria, creatorFilter)
                              .distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
-                     } else {
-                         // Offline: local Room cache
-                         kotlinx.coroutines.flow.first(
-                             repository.searchVehicles(query, criteria, creatorFilter)
-                         ).distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
-                     }
+                      } else {
+                          // Offline: local Room cache
+                          repository.searchVehicles(query, criteria, creatorFilter)
+                              .first()
+                              .distinctBy { it.vehicleNumber.uppercase().replace("\\s+".toRegex(), "") }
+                      }
                      _searchResults.value = com.example.logic.RegionSort.sortKotaFirst(deduped)
                  } catch (e: Exception) {
                      e.printStackTrace()

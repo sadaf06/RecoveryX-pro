@@ -144,6 +144,9 @@ fun SearchScreen(
     var isSyncing by remember { mutableStateOf(false) }
     var hasNewDataPending by remember { mutableStateOf(false) }
     var isLoggingOut by remember { mutableStateOf(false) }
+    // Live server total (cheap aggregation); null = offline, use cached count
+    var serverTotal by remember { mutableStateOf<Long?>(null) }
+    var totalRefreshTick by remember { mutableStateOf(0) }
     val context = LocalContext.current
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
@@ -165,6 +168,15 @@ fun SearchScreen(
         repository.countAllVehiclesByAdmin(adminMobileForCount)
     }
     val adminCaseCount by adminCaseCountFlow.collectAsStateWithLifecycle(initialValue = 0)
+
+    LaunchedEffect(adminFilter, totalRefreshTick) {
+        serverTotal = try {
+            repository.countVehicles(adminFilter)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
 
     LaunchedEffect(currentUser, isSyncing) {
         if (isSyncing) return@LaunchedEffect
@@ -241,6 +253,7 @@ fun SearchScreen(
                                     val prefs = context.getSharedPreferences("recoveryx_prefs", android.content.Context.MODE_PRIVATE)
                                     prefs.edit().putLong("last_download_time", System.currentTimeMillis()).apply()
                                     hasNewDataPending = false
+                                    totalRefreshTick++
                                     android.widget.Toast.makeText(context, "Region synced — $regionCount vehicles cached!", android.widget.Toast.LENGTH_SHORT).show()
                                 } catch (e: Exception) {
                                     android.widget.Toast.makeText(context, "Sync failed: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
@@ -331,6 +344,7 @@ fun SearchScreen(
                                             } catch (e: Exception) {
                                                 e.printStackTrace()
                                             }
+                                            totalRefreshTick++
                                             val prefs = context.getSharedPreferences("recoveryx_prefs", android.content.Context.MODE_PRIVATE)
                                             prefs.edit().putLong("last_download_time", System.currentTimeMillis()).apply()
                                             hasNewDataPending = false
@@ -492,7 +506,7 @@ fun SearchScreen(
                                             .padding(horizontal = 10.dp, vertical = 6.dp)
                                     ) {
                                         Text(
-                                            text = "Total Cases: ${adminCaseCount * 10}",
+                                            text = "Total Cases: ${(serverTotal ?: adminCaseCount.toLong()).let { "%,d".format(it) }}",
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
                                             color = androidx.compose.ui.graphics.Color(0xFF4FD1FF)

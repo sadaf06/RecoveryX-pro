@@ -137,7 +137,7 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun SearchScreen(
     repository: DatabaseRepository,

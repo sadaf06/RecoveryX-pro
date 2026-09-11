@@ -229,13 +229,19 @@ fun SearchScreen(
                                         currentUser?.role == com.example.data.model.UserRole.ADMIN -> currentUser?.mobile
                                         else -> currentUser?.creatorMobile?.ifEmpty { "admin" } ?: "admin"
                                     }
-                                    // Metadata-only refresh (no bulk download — quota-safe).
-                                    // Vehicles arrive per-search and auto-cache for offline use.
+                                    // Metadata refresh + Kota-region download (quota-safe subset).
+                                    // Anything outside the region arrives per-search and auto-caches.
                                     repository.syncSearchMetadata(filter, filter)
+                                    var regionCount = 0
+                                    try {
+                                        regionCount = repository.syncRegionAndCache(filter)
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
                                     val prefs = context.getSharedPreferences("recoveryx_prefs", android.content.Context.MODE_PRIVATE)
                                     prefs.edit().putLong("last_download_time", System.currentTimeMillis()).apply()
                                     hasNewDataPending = false
-                                    android.widget.Toast.makeText(context, "Live search ready — metadata synced!", android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, "Region synced — $regionCount vehicles cached!", android.widget.Toast.LENGTH_SHORT).show()
                                 } catch (e: Exception) {
                                     android.widget.Toast.makeText(context, "Sync failed: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
                                 } finally {
@@ -318,8 +324,13 @@ fun SearchScreen(
                                                 currentUser?.role == com.example.data.model.UserRole.ADMIN -> currentUser?.mobile
                                                 else -> currentUser?.creatorMobile?.ifEmpty { "admin" } ?: "admin"
                                             }
-                                            // Metadata-only refresh (no bulk download — quota-safe)
+                                            // Metadata refresh + Kota-region download (quota-safe subset)
                                             repository.syncSearchMetadata(filter, filter)
+                                            try {
+                                                repository.syncRegionAndCache(filter)
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
+                                            }
                                             val prefs = context.getSharedPreferences("recoveryx_prefs", android.content.Context.MODE_PRIVATE)
                                             prefs.edit().putLong("last_download_time", System.currentTimeMillis()).apply()
                                             hasNewDataPending = false

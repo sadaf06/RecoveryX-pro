@@ -320,6 +320,35 @@ class FirestoreSyncManager {
         }
     }
 
+    // Region sync: downloads ONLY Kota-region vehicles (RTO prefixes by
+    // reg_norm). Bounded subset — quota-safe vs full download. Creator
+    // scoping applied in memory. Old docs without reg_norm are skipped.
+    suspend fun syncRegionVehicles(creatorFilter: String?): List<Vehicle> {
+        val merged = mutableListOf<Vehicle>()
+        val seen = mutableSetOf<String>()
+        for (p in com.example.logic.RegionSort.KOTA_RTO_PREFIXES) {
+            try {
+                val snap = vehiclesCollection
+                    .orderBy("reg_norm")
+                    .startAt(p)
+                    .endAt(p + "~")
+                    .limit(2000)
+                    .get()
+                    .await()
+                for (doc in snap.documents) {
+                    if (!seen.add(doc.id)) continue
+                    val v = mapVehicleDoc(doc) ?: continue
+                    if (creatorFilter == null || v.creatorMobile == creatorFilter) {
+                        merged.add(v)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        return merged
+    }
+
     // Live total count via aggregation (cheap: ~1 read per 1000 docs).
     // Used for dashboard counters without downloading everything.
     suspend fun countVehicles(creatorMobile: String?): Long? {

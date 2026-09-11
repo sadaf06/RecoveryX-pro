@@ -343,6 +343,14 @@ class DatabaseRepository(
         return firestoreSyncManager?.countVehicles(creatorMobile)
     }
 
+    // Region sync + local cache (no Firestore push back — no write burn)
+    suspend fun syncRegionAndCache(creatorFilter: String?): Int {
+        val sync = firestoreSyncManager ?: return 0
+        val region = sync.syncRegionVehicles(creatorFilter)
+        cacheServerVehicles(region)
+        return region.size
+    }
+
     suspend fun syncSearchMetadata(creatorFilter: String?, permAdminMobile: String?) {
         try {
             syncUsersFromFirestore(creatorFilter)

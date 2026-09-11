@@ -50,6 +50,33 @@ class MainActivity : ComponentActivity() {
 
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             val navController = rememberNavController()
+            val context = androidx.compose.ui.platform.LocalContext.current
+
+            // Auto-logout mid-session: recharge beech me expire ho to turant login pe bhejo
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                while (true) {
+                    kotlinx.coroutines.delay(5 * 60 * 1000L)
+                    try {
+                        val u = com.example.logic.AuthManager.currentUser.value
+                        if (u != null) {
+                            val ok = try {
+                                com.example.logic.SubscriptionGate.check(repository, u).ok
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                true
+                            }
+                            if (!ok) {
+                                com.example.logic.AuthManager.logout(context)
+                                navController.navigate(com.example.ui.navigation.LoginRoute) {
+                                    popUpTo(0) { inclusive = true }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
 
             NavHost(navController = navController, startDestination = LoginRoute) {
                 composable<LoginRoute> {

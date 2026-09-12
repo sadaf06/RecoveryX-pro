@@ -13,6 +13,9 @@ interface UserDao {
     @Query("SELECT * FROM users")
     fun getAllUsers(): Flow<List<User>>
 
+    @Query("SELECT * FROM users")
+    suspend fun getAllUsersSync(): List<User>
+
     @Query("SELECT * FROM users WHERE mobile = :mobile LIMIT 1")
     suspend fun getUserByMobile(mobile: String): User?
 

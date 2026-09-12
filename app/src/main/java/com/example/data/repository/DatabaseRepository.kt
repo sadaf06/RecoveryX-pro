@@ -149,17 +149,32 @@ class DatabaseRepository(
         firestoreSyncManager?.let { sync ->
             try {
                 val users = sync.getAllUsersFromFirestore()
+                val fetchedMobiles = mutableSetOf<String>()
                 for (u in users) {
                     // Filter matching admin's users if creatorFilter is provided
                     if (creatorFilter != null && u.creatorMobile != creatorFilter) {
                         continue
                     }
+                    fetchedMobiles.add(u.mobile)
                     val existing = userDao.getUserByMobile(u.mobile)
                     if (existing == null) {
                         userDao.insertUser(u)
                     } else {
                         userDao.updateUser(u.copy(id = existing.id))
                     }
+                }
+                // Prune ghosts: server-deleted accounts lingering in Room.
+                // Offline-created rows (empty authUid) are never touched.
+                try {
+                    for (local in userDao.getAllUsersSync()) {
+                        if (local.mobile !in fetchedMobiles && local.authUid.isNotEmpty() &&
+                            (creatorFilter == null || local.creatorMobile == creatorFilter || local.mobile == creatorFilter)
+                        ) {
+                            userDao.deleteUserById(local.id)
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

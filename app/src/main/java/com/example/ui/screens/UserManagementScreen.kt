@@ -64,6 +64,31 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
         return com.google.firebase.auth.FirebaseAuth.getInstance(app!!)
     }
 
+    // Token scope pack for rules v2 identity: "ROLE:mobile:scope"
+    private fun authScopePack(role: UserRole, mobile: String, creatorMobile: String): String {
+        val m = mobile.trim()
+        val scope = if (m == "admin") "ALL"
+        else if (role == UserRole.ADMIN) m
+        else creatorMobile.trim().ifEmpty { m }
+        return "$role:$m:$scope"
+    }
+
+    private suspend fun setScopeOnSecondaryUser(
+        sAuth: com.google.firebase.auth.FirebaseAuth,
+        pack: String
+    ) {
+        val u = sAuth.currentUser ?: return
+        try {
+            u.updateProfile(
+                com.google.firebase.auth.UserProfileChangeRequest.Builder()
+                    .setDisplayName(pack)
+                    .build()
+            ).await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     fun saveUser(user: User, context: android.content.Context?, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
         viewModelScope.launch {
             try {
@@ -77,6 +102,10 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
                             "${finalUser.mobile}@recoveryx.app", finalUser.passwordHash
                         ).await()
                         val uid = res.user!!.uid
+                        setScopeOnSecondaryUser(
+                            sAuth,
+                            authScopePack(finalUser.role, finalUser.mobile, finalUser.creatorMobile)
+                        )
                         finalUser = finalUser.copy(
                             authUid = uid,
                             email = "${finalUser.mobile}@recoveryx.app"
@@ -116,6 +145,29 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
                             "${user.mobile}@recoveryx.app", oldPassword
                         ).await()
                         res.user!!.updatePassword(user.passwordHash).await()
+                        setScopeOnSecondaryUser(
+                            sAuth,
+                            authScopePack(user.role, user.mobile, user.creatorMobile)
+                        )
+                    } finally {
+                        try { sAuth.signOut() } catch (e: Exception) {}
+                    }
+                }
+                if (context != null && com.example.logic.NetworkUtils.isNetworkAvailable(context) &&
+                    user.passwordHash == oldPassword
+                ) {
+                    // Password same: still refresh token scope (role may have changed)
+                    val sAuth = secondaryAuth(context)
+                    try {
+                        sAuth.signInWithEmailAndPassword(
+                            "${user.mobile}@recoveryx.app", oldPassword
+                        ).await()
+                        setScopeOnSecondaryUser(
+                            sAuth,
+                            authScopePack(user.role, user.mobile, user.creatorMobile)
+                        )
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     } finally {
                         try { sAuth.signOut() } catch (e: Exception) {}
                     }

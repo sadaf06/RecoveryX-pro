@@ -63,10 +63,6 @@ class SearchViewModel(private val repository: DatabaseRepository) : ViewModel() 
     // file key "creator__file" -> uploaded_at (one small fetch, reused for ranking)
     var fileTimes: Map<String, Long> = emptyMap()
 
-    fun setFileTimes(map: Map<String, Long>) {
-        fileTimes = map
-    }
-
     fun selectCriteria(criteria: com.example.data.model.SearchCriteria, creatorFilter: String? = lastCreatorFilter) {
         _searchCriteria.value = criteria
         search(lastQuery, criteria, creatorFilter, lastIsOnline)
@@ -196,7 +192,7 @@ fun SearchScreen(
             val files = if (online) repository.getFirestoreUploadedFiles(adminFilter)
             else if (adminFilter == null) repository.getAllLocalUploadedFiles(context)
             else repository.getLocalUploadedFiles(adminFilter, context)
-            viewModel.setFileTimes(files.associate { "${it.adminMobile}__${it.fileName}" to it.uploadedAt })
+            viewModel.fileTimes = files.associate { "${it.adminMobile}__${it.fileName}" to it.uploadedAt }
         } catch (e: Exception) {
             e.printStackTrace()
         }

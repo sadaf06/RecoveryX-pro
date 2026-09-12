@@ -113,9 +113,11 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
         error = null
         viewModelScope.launch {
             var user: User? = null
+            var authVerified = false
             val online = NetworkUtils.isNetworkAvailable(context)
             if (online) {
-                // Secure mode: Firebase Auth sign-in, then UID-keyed profile
+                // Secure mode: Firebase Auth sign-in, then UID-keyed profile.
+                // Auth success itself proves the password — doc comparison skipped.
                 try {
                     val authResult = FirebaseAuth.getInstance()
                         .signInWithEmailAndPassword("${mobile.trim()}@recoveryx.app", pass)
@@ -128,6 +130,7 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
                         isLoggingIn = false
                         return@launch
                     }
+                    authVerified = true
                 } catch (e: Exception) {
                     when (e) {
                         is com.google.firebase.FirebaseNetworkException -> {
@@ -160,7 +163,9 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
 
             isLoggingIn = false
 
-            if (user != null && user.passwordHash == pass) {
+            // Online Auth success already proved the password (docs stay blank
+            // since US-006); offline compares against the locally cached one.
+            if (user != null && (authVerified || user.passwordHash == pass)) {
                 if (user.status == com.example.data.model.UserStatus.DISABLED) {
                     error = "Account is deactivated. Contact Admin."
                     return@launch

@@ -64,13 +64,13 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
         return com.google.firebase.auth.FirebaseAuth.getInstance(app!!)
     }
 
-    // Token scope pack for rules v2 identity: "ROLE:mobile:scope"
+    // Token scope pack for rules v3 identity: just the SCOPE string
+    // (admin mobile, or ALL). Compared directly — no parsing.
     private fun authScopePack(role: UserRole, mobile: String, creatorMobile: String): String {
         val m = mobile.trim()
-        val scope = if (m == "admin") "ALL"
-        else if (role == UserRole.ADMIN) m
-        else creatorMobile.trim().ifEmpty { m }
-        return "$role:$m:$scope"
+        if (m == "admin") return "ALL"
+        if (role == UserRole.ADMIN) return m
+        return creatorMobile.trim().ifEmpty { m }
     }
 
     private suspend fun setScopeOnSecondaryUser(

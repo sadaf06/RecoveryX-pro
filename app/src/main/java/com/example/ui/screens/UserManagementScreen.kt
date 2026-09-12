@@ -226,9 +226,43 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
         }
     }
 
-    fun deleteUser(user: User) {
+    fun deleteUser(user: User, context: android.content.Context? = null) {
         viewModelScope.launch {
-            repository.deleteUser(user)
+            try {
+                // Password BEFORE wipe (needed for Auth self-delete below)
+                var pw = user.passwordHash
+                val online = context != null && com.example.logic.NetworkUtils.isNetworkAvailable(context)
+                if (online && user.authUid.isNotEmpty()) {
+                    try {
+                        repository.getUserSecret(user.authUid)?.takeIf { it.isNotEmpty() }?.let { pw = it }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+                repository.deleteUser(user)
+                if (online && user.authUid.isNotEmpty() && pw.isNotEmpty() && context != null) {
+                    // Full cleanup: sign in as the user and delete their Auth account
+                    // (clients cannot delete OTHER users' Auth accounts)
+                    val sAuth = secondaryAuth(context)
+                    try {
+                        val res = sAuth.signInWithEmailAndPassword(
+                            "${user.mobile}@recoveryx.app", pw
+                        ).await()
+                        try {
+                            res.user!!.delete().await()
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    } catch (e: Exception) {
+                        // Auth cleanup failed (orphan may remain) — adoptable on recreate
+                        e.printStackTrace()
+                    } finally {
+                        try { sAuth.signOut() } catch (e: Exception) {}
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -684,7 +718,7 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
                 selectedUserForEdit = null
             },
             onDelete = { userToDelete ->
-                viewModel.deleteUser(userToDelete)
+                viewModel.deleteUser(userToDelete, context)
                 selectedUserForEdit = null
             }
         )
@@ -701,7 +735,7 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
             title = "CONFIRM DELETION",
             onDismiss = { userToDeleteByCard = null },
             onSave = {
-                viewModel.deleteUser(userItem)
+                viewModel.deleteUser(userItem, context)
                 userToDeleteByCard = null
             },
             saveText = "DELETE",

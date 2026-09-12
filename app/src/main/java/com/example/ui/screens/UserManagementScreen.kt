@@ -1097,7 +1097,7 @@ fun EditUserDialog(
         onDismiss = onDismiss,
         onSave = {
             val trimmedEmail = email.trim()
-            if (name.isBlank() || mobile.isBlank() || password.isBlank()) {
+            if (name.isBlank() || mobile.isBlank()) {
                 // Let basic text input validations pass
             } else if (trimmedEmail.isEmpty()) {
                 emailError = "Email ID is required"
@@ -1105,7 +1105,9 @@ fun EditUserDialog(
                 emailError = "Invalid email format"
             } else {
                 emailError = null
-                onSave(user.copy(name = name.trim(), mobile = mobile.trim(), passwordHash = password.trim(), role = role, status = status, registeredDeviceId = registeredDeviceId, isFirstTime = isFirstTime, email = trimmedEmail))
+                // Blank password = keep current (vault holds it since US-006)
+                val finalPassword = password.trim().ifEmpty { initialPassword.ifEmpty { user.passwordHash } }
+                onSave(user.copy(name = name.trim(), mobile = mobile.trim(), passwordHash = finalPassword, role = role, status = status, registeredDeviceId = registeredDeviceId, isFirstTime = isFirstTime, email = trimmedEmail))
             }
         },
         extraAction = {
@@ -1146,7 +1148,7 @@ fun EditUserDialog(
             )
         }
 
-        OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Password", color = Color(0xFFA1A8B8)) }, modifier = Modifier.fillMaxWidth(), textStyle = androidx.compose.ui.text.TextStyle(color = Color.White), colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Color(0x33FFFFFF), focusedBorderColor = Color(0xFF4F7CFF)))
+        OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Password (blank = keep current)", color = Color(0xFFA1A8B8)) }, modifier = Modifier.fillMaxWidth(), textStyle = androidx.compose.ui.text.TextStyle(color = Color.White), colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Color(0x33FFFFFF), focusedBorderColor = Color(0xFF4F7CFF)))
         
         Spacer(modifier = Modifier.height(16.dp))
         Text("ROLE & STATUS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFA1A8B8), letterSpacing = 1.sp)

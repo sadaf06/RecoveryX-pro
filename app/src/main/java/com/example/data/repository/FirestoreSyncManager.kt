@@ -44,8 +44,9 @@ class FirestoreSyncManager {
     private val usersCollection get() = db.collection("users")
     private val historiesCollection get() = db.collection("search_histories")
 
-    // Users Sync
+    // Users Sync (secure mode: doc ID = Auth UID, legacy fallback = mobile)
     suspend fun uploadUser(user: User) {
+        val docId = user.authUid.ifEmpty { user.mobile }
         val mappedData = hashMapOf(
             "name" to user.name,
             "mobile" to user.mobile,
@@ -55,13 +56,15 @@ class FirestoreSyncManager {
             "registered_device_id" to user.registeredDeviceId,
             "is_first_time" to user.isFirstTime,
             "creator_mobile" to user.creatorMobile,
-            "email" to user.email
+            "email" to user.email,
+            "uid" to user.authUid,
+            "auth_uid" to user.authUid
         )
-        usersCollection.document(user.mobile).set(mappedData).await()
+        usersCollection.document(docId).set(mappedData).await()
     }
 
-    suspend fun deleteUser(mobile: String) {
-        usersCollection.document(mobile).delete().await()
+    suspend fun deleteUser(docId: String) {
+        usersCollection.document(docId).delete().await()
     }
 
     suspend fun deleteUsersByCreator(creatorMobile: String) {
@@ -101,11 +104,15 @@ class FirestoreSyncManager {
         }
     }
 
-    suspend fun getUserFromFirestore(mobile: String): User? {
-        val doc = usersCollection.document(mobile).get().await()
+    suspend fun getUserByUid(uid: String): User? {
+        val doc = usersCollection.document(uid).get().await()
         if (!doc.exists()) return null
-        
+        return parseUserDoc(doc.id, doc)
+    }
+
+    private fun parseUserDoc(docId: String, doc: com.google.firebase.firestore.DocumentSnapshot): User {
         val name = doc.getString("name") ?: ""
+        val mobile = doc.getString("mobile") ?: docId
         val pass = doc.getString("password") ?: ""
         val roleStr = doc.getString("role") ?: UserRole.NORMAL_USER.name
         val statusStr = doc.getString("status") ?: UserStatus.ACTIVE.name
@@ -113,7 +120,9 @@ class FirestoreSyncManager {
         val isFirstTime = doc.getBoolean("is_first_time") ?: true
         val creatorMobile = doc.getString("creator_mobile") ?: "admin"
         val email = doc.getString("email") ?: ""
-        
+        val authUid = doc.getString("auth_uid")?.ifEmpty { null }
+            ?: doc.getString("uid")?.ifEmpty { null }
+            ?: ""
         return User(
             name = name,
             mobile = mobile,
@@ -123,34 +132,22 @@ class FirestoreSyncManager {
             registeredDeviceId = reqDeviceId,
             isFirstTime = isFirstTime,
             creatorMobile = creatorMobile,
-            email = email
+            email = email,
+            authUid = authUid
         )
+    }
+
+    suspend fun getUserFromFirestore(mobile: String): User? {
+        val doc = usersCollection.document(mobile).get().await()
+        if (!doc.exists()) return null
+        
+        return parseUserDoc(doc.id, doc)
     }
 
     suspend fun getAllUsersFromFirestore(): List<User> {
         val result = usersCollection.get().await()
         return result.documents.map { doc ->
-            val num = doc.id
-            val name = doc.getString("name") ?: ""
-            val pass = doc.getString("password") ?: ""
-            val roleStr = doc.getString("role") ?: UserRole.NORMAL_USER.name
-            val statusStr = doc.getString("status") ?: UserStatus.ACTIVE.name
-            val reqDeviceId = doc.getString("registered_device_id") ?: ""
-            val isFirstTime = doc.getBoolean("is_first_time") ?: true
-            val creatorMobile = doc.getString("creator_mobile") ?: "admin"
-            val email = doc.getString("email") ?: ""
-            
-            User(
-                name = name,
-                mobile = num,
-                passwordHash = pass,
-                role = parseUserRole(roleStr),
-                status = parseUserStatus(statusStr),
-                registeredDeviceId = reqDeviceId,
-                isFirstTime = isFirstTime,
-                creatorMobile = creatorMobile,
-                email = email
-            )
+            parseUserDoc(doc.id, doc)
         }
     }
 

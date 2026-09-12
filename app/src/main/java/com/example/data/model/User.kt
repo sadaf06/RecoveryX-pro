@@ -27,5 +27,7 @@ data class User(
     val registeredDeviceId: String = "",
     val isFirstTime: Boolean = true,
     val creatorMobile: String = "admin",
-    val email: String = ""
+    val email: String = "",
+    // Firebase Auth UID (secure mode). Empty for legacy/mobile-keyed records.
+    val authUid: String = ""
 )

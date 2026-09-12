@@ -4,6 +4,8 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.dao.FieldPermissionsDao
 import com.example.data.dao.UserDao
 import com.example.data.dao.VehicleDao
@@ -42,11 +44,17 @@ class Converters {
     fun fromUserStatus(value: UserStatus): String = value.name
 }
 
-@Database(entities = [User::class, Vehicle::class, FieldPermissions::class, SearchHistory::class], version = 7, exportSchema = false)
+@Database(entities = [User::class, Vehicle::class, FieldPermissions::class, SearchHistory::class], version = 8, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
     abstract fun vehicleDao(): VehicleDao
     abstract fun fieldPermissionsDao(): FieldPermissionsDao
     abstract fun searchHistoryDao(): SearchHistoryDao
+}
+
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE users ADD COLUMN authUid TEXT NOT NULL DEFAULT ''")
+    }
 }

@@ -28,6 +28,11 @@ object AuthManager {
 
     fun logout(context: android.content.Context) {
         _currentUser.value = null
+        try {
+            com.google.firebase.auth.FirebaseAuth.getInstance().signOut()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         val prefs = context.getSharedPreferences("auth_prefs", android.content.Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
     }

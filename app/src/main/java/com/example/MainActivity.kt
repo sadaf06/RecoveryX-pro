@@ -36,7 +36,7 @@ class MainActivity : ComponentActivity() {
     val db = Room.databaseBuilder(
         applicationContext,
         AppDatabase::class.java, "vehicle-database"
-    ).fallbackToDestructiveMigration().build()
+    ).addMigrations(com.example.data.MIGRATION_7_8).fallbackToDestructiveMigration().build()
     
     val firestoreSyncManager = com.example.data.repository.FirestoreSyncManager()
     val repository = DatabaseRepository(db.userDao(), db.vehicleDao(), db.fieldPermissionsDao(), db.searchHistoryDao(), firestoreSyncManager)

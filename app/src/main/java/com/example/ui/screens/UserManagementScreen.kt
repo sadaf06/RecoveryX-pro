@@ -39,6 +39,7 @@ import com.example.data.model.UserRole
 import com.example.data.model.UserStatus
 import com.example.logic.AuthManager
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 class UserManagementViewModel(private val repository: DatabaseRepository) : ViewModel() {
     val users = repository.allUsers.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -46,16 +47,85 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
     var subsMap by mutableStateOf<Map<String, com.example.data.model.Subscription?>>(emptyMap())
 
     fun saveUser(user: User) {
+        saveUser(user, null) { _, _ -> }
+    }
+
+    private fun secondaryAuth(context: android.content.Context): com.google.firebase.auth.FirebaseAuth {
+        val existing = try {
+            com.google.firebase.FirebaseApp.getInstance("secondary")
+        } catch (e: Exception) {
+            null
+        }
+        val app = existing ?: com.google.firebase.FirebaseApp.initializeApp(
+            context.applicationContext,
+            com.google.firebase.FirebaseOptions.fromResource(context)!!,
+            "secondary"
+        )
+        return com.google.firebase.auth.FirebaseAuth.getInstance(app!!)
+    }
+
+    fun saveUser(user: User, context: android.content.Context?, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
         viewModelScope.launch {
-            val creator = AuthManager.currentUser.value?.mobile ?: "admin"
-            val finalUser = user.copy(creatorMobile = creator)
-            repository.insertUser(finalUser)
+            try {
+                val creator = AuthManager.currentUser.value?.mobile ?: "admin"
+                var finalUser = user.copy(creatorMobile = creator)
+                if (context != null && com.example.logic.NetworkUtils.isNetworkAvailable(context)) {
+                    // Secure mode: Auth account first (UID becomes the Firestore doc ID)
+                    val sAuth = secondaryAuth(context)
+                    try {
+                        val res = sAuth.createUserWithEmailAndPassword(
+                            "${finalUser.mobile}@recoveryx.app", finalUser.passwordHash
+                        ).await()
+                        val uid = res.user!!.uid
+                        finalUser = finalUser.copy(
+                            authUid = uid,
+                            email = "${finalUser.mobile}@recoveryx.app"
+                        )
+                    } finally {
+                        try { sAuth.signOut() } catch (e: Exception) {}
+                    }
+                }
+                repository.insertUser(finalUser)
+                onResult(true, "Account created.")
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onResult(false, e.localizedMessage ?: "Create failed")
+            }
         }
     }
 
     fun updateUser(user: User) {
+        updateUser(user, null, user.passwordHash) { _, _ -> }
+    }
+
+    fun updateUser(
+        user: User,
+        context: android.content.Context?,
+        oldPassword: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
         viewModelScope.launch {
-            repository.updateUser(user)
+            try {
+                if (context != null && com.example.logic.NetworkUtils.isNetworkAvailable(context) &&
+                    user.passwordHash != oldPassword
+                ) {
+                    // Reset the Auth password via secondary sign-in (needs current password on record)
+                    val sAuth = secondaryAuth(context)
+                    try {
+                        val res = sAuth.signInWithEmailAndPassword(
+                            "${user.mobile}@recoveryx.app", oldPassword
+                        ).await()
+                        res.user!!.updatePassword(user.passwordHash).await()
+                    } finally {
+                        try { sAuth.signOut() } catch (e: Exception) {}
+                    }
+                }
+                repository.updateUser(user)
+                onResult(true, "Updated.")
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onResult(false, e.localizedMessage ?: "Update failed")
+            }
         }
     }
 
@@ -478,19 +548,24 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
             isSuperAdmin = currentUser?.mobile == "admin",
             onDismiss = { showAddDialog = false },
             onSave = { user ->
-                viewModel.saveUser(user)
+                viewModel.saveUser(user, context) { ok, msg ->
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                }
                 showAddDialog = false
             }
         )
     }
 
     if (selectedUserForEdit != null) {
+        val editingOriginal = selectedUserForEdit!!
         EditUserDialog(
-            user = selectedUserForEdit!!,
+            user = editingOriginal,
             isSuperAdmin = currentUser?.mobile == "admin",
             onDismiss = { selectedUserForEdit = null },
             onSave = { updatedUser ->
-                viewModel.updateUser(updatedUser)
+                viewModel.updateUser(updatedUser, context, editingOriginal.passwordHash) { ok, msg ->
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                }
                 selectedUserForEdit = null
             },
             onDelete = { userToDelete ->

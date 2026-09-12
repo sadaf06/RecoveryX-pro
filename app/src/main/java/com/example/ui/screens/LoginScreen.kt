@@ -21,7 +21,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.repository.DatabaseRepository
 import com.example.logic.AuthManager
+import com.example.logic.NetworkUtils
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import com.example.data.model.User
 import com.example.data.model.UserRole
 import androidx.lifecycle.ViewModelProvider
@@ -45,7 +48,14 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
         val thirtyDaysMillis = 30L * 24 * 60 * 60 * 1000
         if (System.currentTimeMillis() - loginTime > thirtyDaysMillis) {
             prefs.edit().clear().apply()
+            try { FirebaseAuth.getInstance().signOut() } catch (e: Exception) {}
             return // Token expired
+        }
+
+        // Secure mode: Firebase Auth session must exist, else force re-login
+        if (FirebaseAuth.getInstance().currentUser == null && (userJson != null || mobile != null)) {
+            prefs.edit().clear().apply()
+            return
         }
 
         if (userJson != null) {
@@ -103,20 +113,48 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
         error = null
         viewModelScope.launch {
             var user: User? = null
-            try {
-                // 1. Authenticate / Fetch first from firebase database online
-                val onlineUser = repository.getUserFromFirestore(mobile)
-                if (onlineUser != null) {
-                    user = onlineUser
-                    // Synced update to local cache
-                    repository.updateUser(onlineUser)
+            val online = NetworkUtils.isNetworkAvailable(context)
+            if (online) {
+                // Secure mode: Firebase Auth sign-in, then UID-keyed profile
+                try {
+                    val authResult = FirebaseAuth.getInstance()
+                        .signInWithEmailAndPassword("${mobile.trim()}@recoveryx.app", pass)
+                        .await()
+                    val uid = authResult.user?.uid
+                    user = uid?.let { repository.getUserByUid(it) }
+                    if (user == null) {
+                        try { FirebaseAuth.getInstance().signOut() } catch (e: Exception) {}
+                        error = "Account not migrated yet. Contact Super Admin."
+                        isLoggingIn = false
+                        return@launch
+                    }
+                } catch (e: Exception) {
+                    when (e) {
+                        is com.google.firebase.FirebaseNetworkException -> {
+                            e.printStackTrace()
+                            // fall through to offline cache below
+                        }
+                        is com.google.firebase.auth.FirebaseAuthInvalidUserException -> {
+                            error = "Account not found. Please verify your mobile number."
+                            isLoggingIn = false
+                            return@launch
+                        }
+                        is com.google.firebase.auth.FirebaseAuthInvalidCredentialsException -> {
+                            error = "Incorrect password. Please try again."
+                            isLoggingIn = false
+                            return@launch
+                        }
+                        else -> {
+                            error = e.localizedMessage ?: "Authentication failed. Please retry."
+                            isLoggingIn = false
+                            return@launch
+                        }
+                    }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
 
             if (user == null) {
-                // 2. Fallback to local cache for offline mode login
+                // Offline fallback to local cache
                 user = repository.getUserByMobile(mobile)
             }
 

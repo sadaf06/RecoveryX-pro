@@ -109,7 +109,7 @@ class DatabaseRepository(
         firestoreSyncManager?.let { sync ->
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    sync.deleteUser(user.mobile)
+                    sync.deleteUser(user.authUid.ifEmpty { user.mobile })
                     if (user.role == com.example.data.model.UserRole.ADMIN) {
                         sync.deleteUsersByCreator(user.mobile)
                         sync.deleteDataByCreator(user.mobile)
@@ -127,6 +127,22 @@ class DatabaseRepository(
 
     suspend fun getUserFromFirestore(mobile: String): User? {
         return firestoreSyncManager?.getUserFromFirestore(mobile)
+    }
+
+    // Secure mode: fetch UID-keyed profile + mirror into Room (matched by mobile)
+    suspend fun getUserByUid(uid: String): User? {
+        val remote = firestoreSyncManager?.getUserByUid(uid) ?: return null
+        try {
+            val existing = userDao.getUserByMobile(remote.mobile)
+            if (existing == null) {
+                userDao.insertUser(remote.copy(id = 0))
+            } else {
+                userDao.updateUser(remote.copy(id = existing.id))
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return remote
     }
 
     suspend fun syncUsersFromFirestore(creatorFilter: String? = null) {

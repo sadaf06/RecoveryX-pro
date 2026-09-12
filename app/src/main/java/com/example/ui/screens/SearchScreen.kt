@@ -689,7 +689,7 @@ fun SearchScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     // Recent searches (tap to re-run) when query is blank
                     if (searchQuery.isBlank() && recentNumbers.isNotEmpty()) {
@@ -784,45 +784,21 @@ fun SearchScreen(
                                 onNavigateToDetails(vehicle.vehicleNumber)
                             }
                         ) {
+                            // Slim result card (ui-ux-pro-max data-density):
+                            // number + owner only. Bank/status live in details.
+                            // Whole card stays tappable (>=48dp row).
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(12.dp)
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
                             ) {
-                                if (currentUser?.role != com.example.data.model.UserRole.NORMAL_USER) {
-                                    Box(
-                                        modifier = Modifier
-                                            .background(
-                                                brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                                                    colors = listOf(
-                                                        androidx.compose.ui.graphics.Color(0x264F7CFF),
-                                                        androidx.compose.ui.graphics.Color(0x0D4F7CFF)
-                                                    )
-                                                ),
-                                                shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
-                                            )
-                                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = vehicle.bankName,
-                                            maxLines = 1,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = androidx.compose.ui.graphics.Color(0xFF4FD1FF),
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                }
-
                                 Text(
                                     text = vehicle.vehicleNumber,
-                                    style = MaterialTheme.typography.titleMedium,
+                                    style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = androidx.compose.ui.graphics.Color.White,
                                     maxLines = 1
                                 )
-
-                                Spacer(modifier = Modifier.height(2.dp))
 
                                 Text(
                                     text = vehicle.customerName,
@@ -831,30 +807,6 @@ fun SearchScreen(
                                     maxLines = 1,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
-
-                                if (vehicle.status.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(5.dp)
-                                                .background(
-                                                    color = androidx.compose.ui.graphics.Color(0xFF00C896),
-                                                    shape = CircleShape
-                                                )
-                                        )
-                                        Text(
-                                            text = vehicle.status,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = androidx.compose.ui.graphics.Color(0xFF00C896),
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
                             }
                         }
                     }

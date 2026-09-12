@@ -94,6 +94,7 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
             try {
                 val creator = AuthManager.currentUser.value?.mobile ?: "admin"
                 var finalUser = user.copy(creatorMobile = creator)
+                var plainPassword: String? = null
                 if (context != null && com.example.logic.NetworkUtils.isNetworkAvailable(context)) {
                     // Secure mode: Auth account first (UID becomes the Firestore doc ID)
                     val sAuth = secondaryAuth(context)
@@ -106,15 +107,27 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
                             sAuth,
                             authScopePack(finalUser.role, finalUser.mobile, finalUser.creatorMobile)
                         )
+                        plainPassword = finalUser.passwordHash
                         finalUser = finalUser.copy(
                             authUid = uid,
-                            email = "${finalUser.mobile}@recoveryx.app"
+                            email = "${finalUser.mobile}@recoveryx.app",
+                            // Vault holds the password; doc stays blank (US-006)
+                            passwordHash = ""
                         )
                     } finally {
                         try { sAuth.signOut() } catch (e: Exception) {}
                     }
                 }
                 repository.insertUser(finalUser)
+                if (plainPassword != null) {
+                    try {
+                        repository.saveUserSecret(finalUser.authUid, plainPassword, creator, finalUser.mobile)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        onResult(false, "Account created but vault save failed — retry password edit.")
+                        return@launch
+                    }
+                }
                 onResult(true, "Account created.")
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -135,14 +148,23 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
     ) {
         viewModelScope.launch {
             try {
-                if (context != null && com.example.logic.NetworkUtils.isNetworkAvailable(context) &&
-                    user.passwordHash != oldPassword
-                ) {
+                val online = context != null && com.example.logic.NetworkUtils.isNetworkAvailable(context)
+                // Current password comes from the vault (docs stay blank since US-006)
+                val currentPw = if (online && user.authUid.isNotEmpty()) {
+                    try {
+                        repository.getUserSecret(user.authUid)?.takeIf { it.isNotEmpty() }
+                    } catch (e: Exception) {
+                        null
+                    } ?: oldPassword
+                } else {
+                    oldPassword
+                }
+                if (online && user.passwordHash != oldPassword) {
                     // Reset the Auth password via secondary sign-in (needs current password on record)
-                    val sAuth = secondaryAuth(context)
+                    val sAuth = secondaryAuth(context!!)
                     try {
                         val res = sAuth.signInWithEmailAndPassword(
-                            "${user.mobile}@recoveryx.app", oldPassword
+                            "${user.mobile}@recoveryx.app", currentPw
                         ).await()
                         res.user!!.updatePassword(user.passwordHash).await()
                         setScopeOnSecondaryUser(
@@ -152,15 +174,21 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
                     } finally {
                         try { sAuth.signOut() } catch (e: Exception) {}
                     }
+                    try {
+                        repository.saveUserSecret(user.authUid, user.passwordHash, user.creatorMobile, user.mobile)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        onResult(false, "Auth updated but vault save failed. Retry.")
+                        return@launch
+                    }
                 }
-                if (context != null && com.example.logic.NetworkUtils.isNetworkAvailable(context) &&
-                    user.passwordHash == oldPassword
-                ) {
-                    // Password same: still refresh token scope (role may have changed)
-                    val sAuth = secondaryAuth(context)
+                if (online && user.passwordHash == oldPassword) {
+                    // Password same: still refresh token scope (role may have changed).
+                    // Sign in with the vault password (doc stays blank since US-006).
+                    val sAuth = secondaryAuth(context!!)
                     try {
                         sAuth.signInWithEmailAndPassword(
-                            "${user.mobile}@recoveryx.app", oldPassword
+                            "${user.mobile}@recoveryx.app", currentPw
                         ).await()
                         setScopeOnSecondaryUser(
                             sAuth,
@@ -172,7 +200,10 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
                         try { sAuth.signOut() } catch (e: Exception) {}
                     }
                 }
-                repository.updateUser(user)
+                // Vault era: never write passwords into user docs (online).
+                repository.updateUser(
+                    if (online) user.copy(passwordHash = "") else user
+                )
                 onResult(true, "Updated.")
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -610,12 +641,30 @@ fun UserManagementScreen(repository: DatabaseRepository, onBack: () -> Unit) {
 
     if (selectedUserForEdit != null) {
         val editingOriginal = selectedUserForEdit!!
+        // Prefill password from vault (docs stay blank since US-006)
+        var editPrefillPassword by remember(editingOriginal.mobile) { mutableStateOf<String?>(null) }
+        LaunchedEffect(editingOriginal.mobile) {
+            editPrefillPassword = null
+            val uid = editingOriginal.authUid
+            if (uid.isNotEmpty()) {
+                try {
+                    editPrefillPassword = repository.getUserSecret(uid)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
         EditUserDialog(
             user = editingOriginal,
             isSuperAdmin = currentUser?.mobile == "admin",
+            initialPassword = editPrefillPassword ?: editingOriginal.passwordHash,
             onDismiss = { selectedUserForEdit = null },
             onSave = { updatedUser ->
-                viewModel.updateUser(updatedUser, context, editingOriginal.passwordHash) { ok, msg ->
+                viewModel.updateUser(
+                    updatedUser,
+                    context,
+                    editPrefillPassword ?: editingOriginal.passwordHash
+                ) { ok, msg ->
                     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
                 }
                 selectedUserForEdit = null
@@ -956,15 +1005,16 @@ fun AddUserDialog(isSuperAdmin: Boolean, onDismiss: () -> Unit, onSave: (User) -
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditUserDialog(
-    user: User, 
+    user: User,
     isSuperAdmin: Boolean,
-    onDismiss: () -> Unit, 
+    initialPassword: String = "",
+    onDismiss: () -> Unit,
     onSave: (User) -> Unit,
     onDelete: (User) -> Unit
 ) {
     var name by remember { mutableStateOf(user.name) }
     var mobile by remember { mutableStateOf(user.mobile) }
-    var password by remember { mutableStateOf(user.passwordHash) }
+    var password by remember(user.mobile, initialPassword) { mutableStateOf(initialPassword.ifEmpty { user.passwordHash }) }
     var email by remember { mutableStateOf(user.email) }
     var role by remember { mutableStateOf(user.role) }
     var status by remember { mutableStateOf(user.status) }

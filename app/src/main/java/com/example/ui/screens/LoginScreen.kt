@@ -166,6 +166,16 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
                     return@launch
                 }
 
+                // Vault era: docs stay blank — cache the verified typed password
+                // locally so offline login keeps working.
+                if (online) {
+                    try {
+                        repository.cacheLocalPassword(user.mobile, pass)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+
                 // Subscription gate: recharge khatm -> login band (super admin exempt)
                 val subCheck = try {
                     com.example.logic.SubscriptionGate.check(repository, user)

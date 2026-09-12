@@ -599,6 +599,37 @@ class FirestoreSyncManager {
         }
     }
 
+    // Password vault (US-006): passwords OUT of listable user docs
+    private val secretsCollection get() = db.collection("user_secrets")
+
+    suspend fun getUserSecret(uid: String): String? {
+        return try {
+            val doc = secretsCollection.document(uid).get().await()
+            if (!doc.exists()) null else doc.getString("password")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    suspend fun saveUserSecret(uid: String, password: String, adminMobile: String, mobile: String) {
+        secretsCollection.document(uid).set(
+            hashMapOf(
+                "password" to password,
+                "admin_mobile" to adminMobile,
+                "mobile" to mobile
+            )
+        ).await()
+    }
+
+    suspend fun deleteUserSecret(uid: String) {
+        try {
+            secretsCollection.document(uid).delete().await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     // Subscriptions (admin-level recharge gate, shared with web app)
     private val subscriptionsCollection get() = db.collection("subscriptions")
 

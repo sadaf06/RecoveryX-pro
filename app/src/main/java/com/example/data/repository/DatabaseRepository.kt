@@ -98,6 +98,13 @@ class DatabaseRepository(
 
     suspend fun deleteUser(user: User) {
         userDao.deleteUserById(user.id)
+        if (user.authUid.isNotEmpty()) {
+            try {
+                firestoreSyncManager?.deleteUserSecret(user.authUid)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
         if (user.role == com.example.data.model.UserRole.ADMIN) {
             userDao.deleteUsersByCreator(user.mobile)
             vehicleDao.deleteVehiclesByCreator(user.mobile)
@@ -137,12 +144,37 @@ class DatabaseRepository(
             if (existing == null) {
                 userDao.insertUser(remote.copy(id = 0))
             } else {
-                userDao.updateUser(remote.copy(id = existing.id))
+                // Preserve locally cached password when the doc carries none (vault era)
+                val pw = remote.passwordHash.ifEmpty { existing.passwordHash }
+                userDao.updateUser(remote.copy(id = existing.id, passwordHash = pw))
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
         return remote
+    }
+
+    // Cache the typed password after a successful online Auth login
+    // (docs stay blank; this keeps offline login working)
+    suspend fun cacheLocalPassword(mobile: String, password: String) {
+        try {
+            val existing = userDao.getUserByMobile(mobile) ?: return
+            userDao.updateUser(existing.copy(passwordHash = password))
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    suspend fun getUserSecret(uid: String): String? {
+        return firestoreSyncManager?.getUserSecret(uid)
+    }
+
+    suspend fun saveUserSecret(uid: String, password: String, adminMobile: String, mobile: String) {
+        firestoreSyncManager?.saveUserSecret(uid, password, adminMobile, mobile)
+    }
+
+    suspend fun deleteUserSecret(uid: String) {
+        firestoreSyncManager?.deleteUserSecret(uid)
     }
 
     suspend fun syncUsersFromFirestore(creatorFilter: String? = null) {
@@ -160,7 +192,9 @@ class DatabaseRepository(
                     if (existing == null) {
                         userDao.insertUser(u)
                     } else {
-                        userDao.updateUser(u.copy(id = existing.id))
+                        // Preserve locally cached password when the doc carries none (vault era)
+                        val pw = u.passwordHash.ifEmpty { existing.passwordHash }
+                        userDao.updateUser(u.copy(id = existing.id, passwordHash = pw))
                     }
                 }
                 // Prune ghosts: server-deleted accounts lingering in Room.

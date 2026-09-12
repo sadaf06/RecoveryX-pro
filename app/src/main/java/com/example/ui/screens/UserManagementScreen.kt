@@ -96,12 +96,26 @@ class UserManagementViewModel(private val repository: DatabaseRepository) : View
                 var finalUser = user.copy(creatorMobile = creator)
                 var plainPassword: String? = null
                 if (context != null && com.example.logic.NetworkUtils.isNetworkAvailable(context)) {
-                    // Secure mode: Auth account first (UID becomes the Firestore doc ID)
+                    // Secure mode: Auth account first (UID becomes the Firestore doc ID).
+                    // Orphaned Auth account (doc deleted earlier) is adopted by
+                    // proving the SAME password; fails safely otherwise.
                     val sAuth = secondaryAuth(context)
                     try {
-                        val res = sAuth.createUserWithEmailAndPassword(
-                            "${finalUser.mobile}@recoveryx.app", finalUser.passwordHash
-                        ).await()
+                        val res = try {
+                            sAuth.createUserWithEmailAndPassword(
+                                "${finalUser.mobile}@recoveryx.app", finalUser.passwordHash
+                            ).await()
+                        } catch (e: Exception) {
+                            if (e is com.google.firebase.auth.FirebaseAuthUserCollisionException) {
+                                try {
+                                    sAuth.signInWithEmailAndPassword(
+                                        "${finalUser.mobile}@recoveryx.app", finalUser.passwordHash
+                                    ).await()
+                                } catch (se: Exception) {
+                                    throw Exception("Auth account exists with a different password. Delete it from Firebase Console → Authentication, then retry.")
+                                }
+                            } else throw e
+                        }
                         val uid = res.user!!.uid
                         setScopeOnSecondaryUser(
                             sAuth,

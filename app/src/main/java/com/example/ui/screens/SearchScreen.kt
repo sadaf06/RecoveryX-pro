@@ -150,6 +150,7 @@ fun SearchScreen(
     var searchQuery by remember { mutableStateOf("") }
     val currentUser by AuthManager.currentUser.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     // Process-death / next-day resume: restore Hello User before user types.
     LaunchedEffect(Unit) {
@@ -169,7 +170,6 @@ fun SearchScreen(
     // Live server total (cheap aggregation); null = offline, use cached count
     var serverTotal by remember { mutableStateOf<Long?>(null) }
     var totalRefreshTick by remember { mutableStateOf(0) }
-    val context = LocalContext.current
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 

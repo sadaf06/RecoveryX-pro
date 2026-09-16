@@ -22,10 +22,8 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Install required SDK packages
-        run: |
-          yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" --sdk_root="$ANDROID_SDK_ROOT" > /dev/null
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0'
 
       - name: Restore debug keystore
         run: base64 -d debug.keystore.base64 > debug.keystore

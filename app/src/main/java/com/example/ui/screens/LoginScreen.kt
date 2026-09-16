@@ -46,14 +46,17 @@ class LoginViewModel(private val repository: DatabaseRepository) : ViewModel() {
         val loginTime = prefs.getLong("login_time", 0)
 
         val thirtyDaysMillis = 30L * 24 * 60 * 60 * 1000
-        if (System.currentTimeMillis() - loginTime > thirtyDaysMillis) {
+        if (loginTime != 0L && System.currentTimeMillis() - loginTime > thirtyDaysMillis) {
             prefs.edit().clear().apply()
             try { FirebaseAuth.getInstance().signOut() } catch (e: Exception) {}
             return // Token expired
         }
 
-        // Secure mode: Firebase Auth session must exist, else force re-login
-        if (FirebaseAuth.getInstance().currentUser == null && (userJson != null || mobile != null)) {
+        // Secure mode, but offline-tolerant: only force re-login when ONLINE and Firebase session missing.
+        // Offline we keep cached session so next-day/band-kam area me Hello User / dead search nahi aayega.
+        val hasNetwork = NetworkUtils.isNetworkAvailable(context)
+        if (hasNetwork && FirebaseAuth.getInstance().currentUser == null && (userJson != null || mobile != null)) {
+            // Online but Firebase session gone -> treat as expired, force re-login
             prefs.edit().clear().apply()
             return
         }

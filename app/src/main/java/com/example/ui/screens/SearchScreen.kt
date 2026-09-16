@@ -151,6 +151,18 @@ fun SearchScreen(
     val currentUser by AuthManager.currentUser.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
+    // Process-death / next-day resume: restore Hello User before user types.
+    LaunchedEffect(Unit) {
+        if (currentUser == null) {
+            AuthManager.restoreFromPrefs(context)
+            // If still null after short wait and we are not on Login, force login
+            kotlinx.coroutines.delay(600)
+            if (AuthManager.currentUser.value == null) {
+                try { onLogout() } catch (e: Exception) { e.printStackTrace() }
+            }
+        }
+    }
+
     var isSyncing by remember { mutableStateOf(false) }
     var hasNewDataPending by remember { mutableStateOf(false) }
     var isLoggingOut by remember { mutableStateOf(false) }

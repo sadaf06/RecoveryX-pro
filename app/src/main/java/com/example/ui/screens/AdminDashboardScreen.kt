@@ -94,6 +94,16 @@ fun AdminDashboardScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
 
+    LaunchedEffect(Unit) {
+        if (currentUser == null) {
+            AuthManager.restoreFromPrefs(context)
+            kotlinx.coroutines.delay(600)
+            if (AuthManager.currentUser.value == null) {
+                try { onLogout() } catch (e: Exception) { e.printStackTrace() }
+            }
+        }
+    }
+
     val isSuperAdmin = currentUser?.mobile == "admin"
     val screenTitle = if (isSuperAdmin) {
         "SUPER ADMIN CONSOLE"

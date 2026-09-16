@@ -32,6 +32,8 @@ class MainActivity : ComponentActivity() {
     System.setProperty("log4j2.formatMsgNoLookups", "true")
     System.setProperty("log4j2.disable.jmx", "true")
     enableEdgeToEdge()
+    // Restore in-memory session after process death so Search/Admin don't show Hello User
+    try { com.example.logic.AuthManager.restoreFromPrefs(applicationContext) } catch (e: Exception) { e.printStackTrace() }
 
     val db = Room.databaseBuilder(
         applicationContext,
@@ -51,6 +53,40 @@ class MainActivity : ComponentActivity() {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             val navController = rememberNavController()
             val context = androidx.compose.ui.platform.LocalContext.current
+
+            // Resume guard: next-day / background->foreground pe in-memory session blank ho to restore karo.
+            // Warna nav restored Search pe atak kar Hello User + dead search dikhata hai.
+            androidx.compose.runtime.DisposableEffect(Unit) {
+                val lifecycle = (context as androidx.lifecycle.LifecycleOwner).lifecycle
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                        try {
+                            if (com.example.logic.AuthManager.currentUser.value == null) {
+                                com.example.logic.AuthManager.restoreFromPrefs(context)
+                            }
+                            val restored = com.example.logic.AuthManager.currentUser.value
+                            val route = navController.currentDestination?.route
+                            val isLoginDest = route?.contains("Login", ignoreCase = true) == true
+                            if (restored == null && !isLoginDest) {
+                                try {
+                                    navController.navigate(com.example.ui.navigation.LoginRoute) {
+                                        popUpTo(0) { inclusive = true }
+                                    }
+                                } catch (e: Exception) { e.printStackTrace() }
+                            }
+                            // X days expired -> clear and force login (online only check already in LoginScreen)
+                            if (restored != null && com.example.logic.AuthManager.isSessionExpired(context)) {
+                                com.example.logic.AuthManager.logout(context)
+                                navController.navigate(com.example.ui.navigation.LoginRoute) {
+                                    popUpTo(0) { inclusive = true }
+                                }
+                            }
+                        } catch (e: Exception) { e.printStackTrace() }
+                    }
+                }
+                lifecycle.addObserver(observer)
+                onDispose { lifecycle.removeObserver(observer) }
+            }
 
             // Auto-logout mid-session: recharge beech me expire ho to turant login pe bhejo
             androidx.compose.runtime.LaunchedEffect(Unit) {

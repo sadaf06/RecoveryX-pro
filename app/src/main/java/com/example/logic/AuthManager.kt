@@ -36,4 +36,34 @@ object AuthManager {
         val prefs = context.getSharedPreferences("auth_prefs", android.content.Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
     }
+
+    /** Restore in-memory session from SharedPreferences after process death / cold resume.
+     * Returns restored user or null. Does NOT clear prefs — caller decides. */
+    fun restoreFromPrefs(context: android.content.Context): User? {
+        if (_currentUser.value != null) return _currentUser.value
+        return try {
+            val prefs = context.getSharedPreferences("auth_prefs", android.content.Context.MODE_PRIVATE)
+            val userJson = prefs.getString("logged_in_user", null) ?: return null
+            val loginTime = prefs.getLong("login_time", 0L)
+            val thirtyDaysMillis = 30L * 24 * 60 * 60 * 1000
+            if (loginTime != 0L && System.currentTimeMillis() - loginTime > thirtyDaysMillis) {
+                return null
+            }
+            if (userJson.isBlank()) return null
+            val user = Json.decodeFromString<User>(userJson)
+            _currentUser.value = user
+            user
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    fun isSessionExpired(context: android.content.Context): Boolean {
+        val prefs = context.getSharedPreferences("auth_prefs", android.content.Context.MODE_PRIVATE)
+        val loginTime = prefs.getLong("login_time", 0L)
+        if (loginTime == 0L) return true
+        val thirtyDaysMillis = 30L * 24 * 60 * 60 * 1000
+        return System.currentTimeMillis() - loginTime > thirtyDaysMillis
+    }
 }
